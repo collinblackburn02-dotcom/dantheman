@@ -2,38 +2,54 @@
 import pandas as pd
 import numpy as np
 
-PURCHASE_GUESS_CANDIDATES = ["PURCHASE", "Purchase", "purchased", "purchasers", "OrderCount", "orders", "Buyer"]
+# Candidate column names the app will accept (system or human-friendly)
+ALIASES = {
+    "EMAIL": ["EMAIL","Email","email"],
+    "PURCHASE": ["PURCHASE","Purchase","purchased","Buyer","is_buyer"],
+    "DATE": ["DATE","Date","date"],
+    "AGE_RANGE": ["AGE_RANGE","Age Range","age_range"],
+    "CHILDREN": ["CHILDREN","Children"],
+    "GENDER": ["GENDER","Gender"],
+    "HOMEOWNER": ["HOMEOWNER","Homeowner"],
+    "MARRIED": ["MARRIED","Married"],
+    "NET_WORTH": ["NET_WORTH","Net Worth","NetWorth"],
+    "INCOME_RANGE": ["INCOME_RANGE","Income Range","income_range"],
+    "CREDIT_RATING": ["SKIPTRACE_CREDIT_RATING","Credit Rating","credit_rating","SKIPTRACE CREDIT RATING"],
+    "EXACT_AGE": ["SKIPTRACE_EXACT_AGE","Exact Age","SKIPTRACE EXACT AGE"],
+    "ETHNIC_CODE": ["SKIPTRACE_ETHNIC_CODE","Ethnic Code","SKIPTRACE ETHNIC CODE"],
+    "ORDER_COUNT": ["OrderCount","Order Count","Orders","orders"],
+    "FIRST_ORDER_DATE": ["FirstOrderDate","First Order Date"],
+    "LAST_ORDER_DATE": ["LastOrderDate","Last Order Date"],
+    "REVENUE": ["Revenue","Total Revenue","Total"],
+    "SKUS": ["SKUs","Sku List","SKU List"],
+    "MOST_RECENT_SKU": ["MostRecentSKU","Most Recent SKU","Recent SKU"],
+}
 
-def coerce_purchase_series(df: pd.DataFrame, purchase_col: str) -> pd.Series:
-    s = df[purchase_col]
-    if np.issubdtype(s.dtype, np.number):
+def resolve_col(df: pd.DataFrame, key: str) -> str | None:
+    """Return the first column name present in df for the alias key."""
+    cands = ALIASES.get(key, [])
+    for c in cands:
+        if c in df.columns:
+            return c
+        # allow loose match on stripped case
+        for dc in df.columns:
+            if str(dc).strip().lower() == str(c).strip().lower():
+                return dc
+    return None
+
+def coerce_purchase_series(df: pd.DataFrame, col: str) -> pd.Series:
+    s = df[col]
+    if pd.api.types.is_numeric_dtype(s):
         return (s.fillna(0) > 0).astype(int)
-    s_str = s.astype(str).str.strip().str.lower()
-    true_vals = {"1","true","yes","y","t","buyer","purchased"}
-    return s_str.isin(true_vals).astype(int)
+    s2 = s.astype(str).str.strip().str.lower()
+    yes = {"1","true","t","yes","y","buyer","purchased"}
+    return s2.isin(yes).astype(int)
 
-def pick_default_purchase_col(df: pd.DataFrame) -> str | None:
-    cols = set(df.columns)
-    for guess in PURCHASE_GUESS_CANDIDATES:
-        if guess in cols:
-            return guess
-    for c in df.columns:
-        lc = c.lower()
-        if "order" in lc or "purchase" in lc or "buyer" in lc:
-            return c
-    return None
+def safe_percent(n, d):
+    return 0.0 if (d is None or d == 0) else (n/d)*100.0
 
-def safe_percent(numer: int, denom: int) -> float:
-    return 0.0 if denom == 0 else (numer / denom) * 100.0
-
-def detect_date_col(df: pd.DataFrame) -> str | None:
-    for c in df.columns:
-        if c.lower() in {"date", "orderdate", "firstorderdate", "lastorderdate", "created_at"}:
-            return c
-    return None
-
-def coerce_datetime(df: pd.DataFrame, col: str) -> pd.Series:
+def to_datetime_series(s: pd.Series) -> pd.Series:
     try:
-        return pd.to_datetime(df[col], errors="coerce")
+        return pd.to_datetime(s, errors="coerce")
     except Exception:
-        return pd.to_datetime(pd.Series([None] * len(df)))
+        return pd.to_datetime(pd.Series([None]*len(s)))

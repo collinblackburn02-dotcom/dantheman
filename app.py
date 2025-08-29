@@ -3,181 +3,188 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from utils import coerce_purchase_series, pick_default_purchase_col, safe_percent, detect_date_col, coerce_datetime
+from utils import resolve_col, coerce_purchase_series, safe_percent, to_datetime_series
 
-st.set_page_config(page_title="CSV Dashboard", layout="wide")
+st.set_page_config(page_title="Merged CSV Dashboard", layout="wide")
 
-st.markdown("## 📊 Customer Analytics Dashboard")
-st.caption("Upload a CSV, choose your purchase column, apply filters, and explore KPIs, leaderboards (1D) and multi-D rankings (up to 4D). Export filtered data anytime.")
+st.title("📊 Merged Customer Dashboard")
+st.caption("Upload the merged CSV from Apps Script. Works with either system-style or human-friendly headers.")
 
 with st.sidebar:
-    st.header("⚙️ Settings")
-    uploaded = st.file_uploader("CSV file", type=["csv"])
-    st.divider()
-    st.write("**Optional column mapping**")
+    uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
+    st.markdown("---")
+    st.write("Chart metric")
+    y_metric_mode = st.radio("Y-axis", ["Purchases","Conversion Rate"], horizontal=True)
 
 @st.cache_data(show_spinner=False)
-def load_df(file) -> pd.DataFrame:
+def load_df(file):
     df = pd.read_csv(file)
-    df.columns = [c.strip() for c in df.columns]
+    df.columns = [str(c).strip() for c in df.columns]
     return df
 
 def agg_by_dim(d: pd.DataFrame, dim: str):
     g = d.groupby(dim, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
-    g["conv_rate"] = (g["purchases"] / g["rows"]).replace([np.inf, -np.inf], np.nan) * 100
+    g["conv_rate"] = (g["purchases"]/g["rows"]).replace([np.inf,-np.inf], np.nan)*100
     g["conv_rate"] = g["conv_rate"].fillna(0.0)
     g[dim] = g[dim].astype(str).replace("nan","(blank)")
     return g
 
-def plot_by_dim_table_and_bar(d: pd.DataFrame, dim: str, sort_metric: str, min_rows: int, top_n: int):
+def leaderboard(d: pd.DataFrame, dim: str, sort_metric: str, min_rows: int, top_n: int):
     g = agg_by_dim(d, dim)
     g = g[g["rows"] >= min_rows]
     if g.empty:
-        st.info(f"No groups meet the minimum rows ≥ {min_rows} for {dim}.")
+        st.info(f"No groups meet min rows ≥ {min_rows}.")
         return
-    # Sort DESC for all metrics (Top = highest)
-    ascending = False
-    g_sorted = g.sort_values(sort_metric, ascending=ascending).copy()
-    g_sorted = g_sorted.iloc[:top_n]
-    gt = g_sorted.rename(columns={dim: dim, "rows":"Visitors", "purchases":"Purchases", "conv_rate":"Conversion %"})
-    gt["Conversion %"] = gt["Conversion %"].map(lambda x: f"{x:.2f}%")
-    st.dataframe(gt, use_container_width=True, hide_index=True)
-    metric_title = {"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"}[sort_metric]
-    y = "conv_rate" if sort_metric == "conv_rate" else sort_metric
-    fig = px.bar(g_sorted, x=dim, y=y, text=g_sorted[y].round(2), title=f"Top {top_n} by {metric_title} • {dim}")
+    g_sorted = g.sort_values(sort_metric, ascending=False).head(top_n)
+    show = g_sorted.rename(columns={dim: dim, "rows":"Visitors", "purchases":"Purchases", "conv_rate":"Conversion %"})
+    show["Conversion %"] = show["Conversion %"].map(lambda x: f"{x:.2f}%")
+    st.dataframe(show, use_container_width=True, hide_index=True)
+    y = "purchases" if y_metric_mode == "Purchases" else "conv_rate"
+    y_title = "Purchases" if y == "purchases" else "Conversion Rate (%)"
+    fig = px.bar(g_sorted, x=dim, y=y, text=g_sorted[y].round(2), title=f"Top {top_n} by {'Purchases' if y=='purchases' else 'Conversion %'}")
     if y == "conv_rate":
-        fig.update_yaxes(title="Conversion (%)")
+        fig.update_yaxes(title=y_title)
     st.plotly_chart(fig, use_container_width=True)
 
-def multi_dim_ranker(d: pd.DataFrame, dims: list[str], sort_metric_key: str, min_rows: int, top_n: int):
-    if len(dims) == 0:
-        st.info("Select 1–4 dimensions to build the combination leaderboard.")
+def multi_dim_ranker(d: pd.DataFrame, dims: list[str], sort_key: str, min_rows: int, top_n: int, show_all: bool):
+    if not dims:
+        st.info("Choose 1–4 dimensions.")
         return
-    if len(dims) > 4:
-        st.warning("Only the first 4 dimensions will be used.")
-        dims = dims[:4]
+    dims = dims[:4]
     g = d.groupby(dims, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
-    g["conv_rate"] = (g["purchases"] / g["rows"]).replace([np.inf, -np.inf], np.nan) * 100
-    # Clean NaN labels
+    g["conv_rate"] = (g["purchases"]/g["rows"]).replace([np.inf,-np.inf], np.nan)*100
     for dim in dims:
         g[dim] = g[dim].astype(str).replace("nan","(blank)")
-    # Apply minimum sample threshold
+    st.caption(f"Found **{len(g)}** combinations before filters.")
     g = g[g["rows"] >= min_rows]
+    st.caption(f"**{len(g)}** combinations meet min rows ≥ {min_rows}.")
     if g.empty:
-        st.info(f"No combinations meet the minimum rows ≥ {min_rows}.")
+        st.info("No combinations after filtering.")
         return
-    # Sort (DESC for all metrics)
-    g_sorted = g.sort_values(sort_metric_key, ascending=False).copy()
-    g_top = g_sorted.head(top_n).copy()
-    # Prepare display
-    display = g_top.rename(columns={"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"})
-    display["Conversion %"] = display["Conversion %"].map(lambda x: f"{x:.2f}%")
-    st.dataframe(display, use_container_width=True, hide_index=True)
-    # Optional: downloadable CSV with raw numeric conv_rate
-    st.download_button(
-        "Download ranked combinations (CSV)",
-        data=g_sorted.head(top_n).to_csv(index=False).encode("utf-8"),
-        file_name="ranked_combinations.csv",
-        mime="text/csv"
-    )
-
-def get_filter(df: pd.DataFrame, col: str, label: str):
-    if col in df.columns:
-        opts = sorted([x for x in df[col].dropna().unique().tolist() if str(x).strip() != "" ])
-        sel = st.multiselect(label, opts, default=[])
-        if sel:
-            return df[df[col].isin(sel)]
-    return df
+    g_sorted = g.sort_values(sort_key, ascending=False)
+    if not show_all:
+        g_sorted = g_sorted.head(top_n)
+    show = g_sorted.rename(columns={"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"})
+    show["Conversion %"] = show["Conversion %"].map(lambda x: f"{x:.2f}%")
+    st.dataframe(show, use_container_width=True, hide_index=True)
+    st.download_button("Download ranked combos", data=g_sorted.to_csv(index=False).encode("utf-8"),
+                       file_name="ranked_combinations.csv", mime="text/csv")
 
 if uploaded:
     df = load_df(uploaded)
-    with st.sidebar:
-        default_purchase_col = pick_default_purchase_col(df) or st.selectbox("Purchase Indicator Column (choose)", list(df.columns))
-        purchase_col = st.selectbox("Purchase Indicator Column", 
-                                    options=[default_purchase_col] + [c for c in df.columns if c != default_purchase_col]) if default_purchase_col else st.selectbox("Purchase Indicator Column", list(df.columns))
-        st.caption("Numeric: >0 = purchased. Text: 'yes/true/1/buyer' = purchased.")
 
-        guessed_date = detect_date_col(df)
-        date_col = st.selectbox("Date Column (optional)", ["" ] + list(df.columns), index=(list(df.columns).index(guessed_date)+1 if guessed_date in df.columns else 0))
+    # Resolve columns
+    email_col = resolve_col(df, "EMAIL")
+    purchase_col = resolve_col(df, "PURCHASE")
+    date_col = resolve_col(df, "DATE")
+    order_count_col = resolve_col(df, "ORDER_COUNT")
+    first_date_col = resolve_col(df, "FIRST_ORDER_DATE")
+    last_date_col  = resolve_col(df, "LAST_ORDER_DATE")
+    revenue_col    = resolve_col(df, "REVENUE")
+    skus_col       = resolve_col(df, "SKUS")
+    recent_sku_col = resolve_col(df, "MOST_RECENT_SKU")
 
-        st.markdown("**Enable filters for these columns (if present):**")
-        filter_cols = []
-        for c in ["GENDER","AGE_RANGE","INCOME_RANGE","NET_WORTH","HOMEOWNER","SKIPTRACE_CREDIT_RATING","MARRIED","CHILDREN"]:
-            if c in df.columns and st.checkbox(c, value=(c in ["GENDER","INCOME_RANGE","SKIPTRACE_CREDIT_RATING","HOMEOWNER"])):
-                filter_cols.append(c)
+    seg_keys = ["AGE_RANGE","CHILDREN","GENDER","HOMEOWNER","MARRIED","NET_WORTH","INCOME_RANGE","CREDIT_RATING"]
+    seg_cols = []
+    for k in seg_keys:
+        c = resolve_col(df, k)
+        if c: seg_cols.append(c)
 
-        st.divider()
-        st.write("**Chart settings**")
-        y_metric_mode = st.radio("Y-axis metric", ["Purchases", "Conversion Rate"], horizontal=True)
-
-    try:
-        df["_PURCHASE"] = coerce_purchase_series(df, purchase_col)
-    except Exception as e:
-        st.error(f"Could not interpret purchase column `{purchase_col}`. Error: {e}")
+    if purchase_col is None:
+        st.error("Could not find a Purchase column. Expected one of: PURCHASE, Purchase, purchased, Buyer, is_buyer.")
         st.stop()
+
+    df["_PURCHASE"] = coerce_purchase_series(df, purchase_col)
+
+    # DATE for filters/trend
     if date_col and date_col in df.columns:
-        df["_DATE"] = coerce_datetime(df, date_col)
+        df["_DATE"] = to_datetime_series(df[date_col])
+    elif last_date_col and last_date_col in df.columns:
+        df["_DATE"] = to_datetime_series(df[last_date_col])
     else:
         df["_DATE"] = pd.NaT
 
-    # Filters
     with st.expander("🔎 Filters", expanded=True):
         dff = df.copy()
-        for c in filter_cols:
-            dff = get_filter(dff, c, f"Filter by {c}")
+        # Date filter
         if not dff["_DATE"].isna().all():
-            min_d = pd.to_datetime(dff["_DATE"].min())
-            max_d = pd.to_datetime(dff["_DATE"].max())
-            if pd.notna(min_d) and pd.notna(max_d):
-                start, end = st.date_input("Date range", (min_d.date(), max_d.date()))
+            mind, maxd = pd.to_datetime(dff["_DATE"].min()), pd.to_datetime(dff["_DATE"].max())
+            if pd.notna(mind) and pd.notna(maxd):
+                start, end = st.date_input("Date range", (mind.date(), maxd.date()))
                 if not isinstance(start, tuple):
                     dff = dff[(dff["_DATE"] >= pd.to_datetime(start)) & (dff["_DATE"] <= pd.to_datetime(end))]
 
+        # SKU contains
+        sku_search = st.text_input("SKU contains (optional)")
+        if skus_col and sku_search:
+            dff = dff[dff[skus_col].astype(str).str.contains(sku_search, case=False, na=False)]
+
+        # Recent SKU filter
+        if recent_sku_col:
+            opts = sorted([x for x in dff[recent_sku_col].dropna().astype(str).unique() if x.strip()])
+            sel = st.multiselect("Most Recent SKU (optional)", opts)
+            if sel:
+                dff = dff[dff[recent_sku_col].astype(str).isin(sel)]
+
+        # Revenue slider
+        if revenue_col:
+            rev = pd.to_numeric(dff[revenue_col], errors="coerce").fillna(0)
+            rmin, rmax = float(rev.min()), float(rev.max())
+            lo, hi = st.slider("Revenue range (sum per person)", min_value=0.0, max_value=max(1.0, rmax), value=(0.0, max(1.0, rmax)))
+            dff = dff[(rev >= lo) & (rev <= hi)]
+
+        # Seg filters
+        for c in seg_cols:
+            opts = sorted([x for x in dff[c].dropna().unique().tolist() if str(x).strip()])
+            sel = st.multiselect(f"Filter by {c}", opts)
+            if sel:
+                dff = dff[dff[c].isin(sel)]
+        st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
+
     # KPIs
     total_rows = len(dff)
-    total_purch = int(dff["_PURCHASE"].sum())
-    conv_rate = safe_percent(total_purch, total_rows)
+    total_p = int(dff["_PURCHASE"].sum())
+    conv = safe_percent(total_p, total_rows)
+    cols = st.columns(4)
+    cols[0].metric("Total People", f"{total_rows:,}")
+    cols[1].metric("Purchases", f"{total_p:,}")
+    cols[2].metric("Conversion Rate", f"{conv:.2f}%")
+    if revenue_col:
+        tot_rev = pd.to_numeric(dff[revenue_col], errors="coerce").fillna(0).sum()
+        cols[3].metric("Total Revenue", f"{tot_rev:,.2f}")
 
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Total Rows", f"{total_rows:,}")
-    kpi2.metric("Purchases", f"{total_purch:,}")
-    kpi3.metric("Conversion Rate", f"{conv_rate:.2f}%")
+    st.markdown("---")
 
-    st.divider()
-
-    # Leaderboard 1D
-    st.subheader("🏆 Leaderboards (1D)")
-    dims_available = [c for c in ["INCOME_RANGE","SKIPTRACE_CREDIT_RATING","NET_WORTH","GENDER","HOMEOWNER","AGE_RANGE","MARRIED","CHILDREN"] if c in dff.columns]
-    if len(dims_available) == 0:
-        st.info("No standard segmentation columns found. Upload a CSV with columns like INCOME_RANGE, GENDER, NET_WORTH, HOMEOWNER, or SKIPTRACE_CREDIT_RATING to enable leaderboards.")
-    else:
+    # Leaderboards
+    st.subheader("🏆 Leaderboards")
+    if seg_cols:
         left, right = st.columns(2)
         with left:
-            dim1 = st.selectbox("Dimension to rank", options=dims_available, index=0)
-            sort_metric = st.selectbox("Sort by", options=["Conversion %","Purchases","Visitors"], index=0)
-            min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
-            top_n = st.slider("Top N", min_value=3, max_value=100, value=10, step=1)
-            sort_key = {"Conversion %":"conv_rate", "Purchases":"purchases", "Visitors":"rows"}[sort_metric]
-            plot_by_dim_table_and_bar(dff, dim1, sort_key, min_rows, top_n)
-
+            dim = st.selectbox("Dimension", options=seg_cols, index=0)
+            sort_metric = st.selectbox("Sort by", options=["conv_rate","purchases","rows"], format_func=lambda x: {"conv_rate":"Conversion %","purchases":"Purchases","rows":"Visitors"}[x])
+            min_rows = st.number_input("Min visitors per group", min_value=1, value=30, step=1)
+            top_n = st.slider("Top N", 3, 100, 10, 1)
+            leaderboard(dff, dim, sort_metric, min_rows, top_n)
         with right:
-            st.markdown("**Multi-D Combinations (up to 4D)**")
-            combo_dims = st.multiselect("Choose 1–4 dimensions", options=dims_available, default=[dims_available[0]] if len(dims_available)>0 else [])
-            metric2 = st.selectbox("Metric", options=["Conversion %","Purchases","Visitors"], index=0)
-            min_rows2 = st.number_input("Minimum Visitors per combination", min_value=1, value=20, step=1, key="min_rows2")
-            top_n2 = st.slider("Top N combinations", min_value=3, max_value=200, value=25, step=1, key="topn2")
-            sort_key2 = {"Conversion %":"conv_rate", "Purchases":"purchases", "Visitors":"rows"}[metric2]
-            multi_dim_ranker(dff, combo_dims, sort_key2, min_rows2, top_n2)
+            st.markdown("**Multi-D Combinations**")
+            dims = st.multiselect("Choose up to 4", options=seg_cols, default=[seg_cols[0]])
+            metric2 = st.selectbox("Metric", options=["conv_rate","purchases","rows"], index=0, format_func=lambda x: {"conv_rate":"Conversion %","purchases":"Purchases","rows":"Visitors"}[x])
+            min_rows2 = st.number_input("Min visitors per combo", min_value=1, value=20, step=1, key="mr2")
+            top_n2 = st.slider("Top N combos", 3, 500, 50, 1, key="tn2")
+            show_all = st.checkbox("Show ALL combos", value=False)
+            multi_dim_ranker(dff, dims, metric2, min_rows2, top_n2, show_all)
+    else:
+        st.info("No segmentation columns detected. Include columns like Gender, Income Range, Net Worth, Homeowner, Credit Rating.")
 
-    st.divider()
+    st.markdown("---")
 
-    # Trend chart
+    # Trend
     if not dff["_DATE"].isna().all():
         st.subheader("📈 Trend Over Time")
         ts = dff.copy()
         ts["date_only"] = ts["_DATE"].dt.date
         line = ts.groupby("date_only")["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
-        line["conv_rate"] = (line["purchases"] / line["rows"]) * 100
+        line["conv_rate"] = (line["purchases"]/line["rows"])*100
         y = "purchases" if y_metric_mode == "Purchases" else "conv_rate"
         y_title = "Purchases" if y == "purchases" else "Conversion Rate (%)"
         fig = px.line(line, x="date_only", y=y, markers=True, title="Trend Over Time")
@@ -185,10 +192,9 @@ if uploaded:
         st.plotly_chart(fig, use_container_width=True)
 
     # Table + Export
-    st.subheader("📥 Filtered Data")
-    st.dataframe(dff, use_container_width=True, height=400)
-    st.download_button("Download filtered CSV", data=dff.to_csv(index=False).encode("utf-8"),
-                       file_name="filtered_data.csv", mime="text/csv")
+    st.subheader("📥 Data (filtered)")
+    st.dataframe(dff, use_container_width=True, height=420)
+    st.download_button("Download filtered CSV", data=dff.to_csv(index=False).encode("utf-8"), file_name="filtered_data.csv", mime="text/csv")
 
 else:
-    st.info("Upload a CSV file from the sidebar to get started.")
+    st.info("Upload your merged CSV to begin.")
