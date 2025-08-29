@@ -178,71 +178,41 @@ if uploaded:
     sort_key = {"Conversion %":"conv_rate","Purchases":"purchases","Visitors":"rows"}[y_metric_mode]
     grp_sorted = grp.sort_values(sort_key, ascending=False).head(top_n)
 
-    # Display table with action buttons
-    # Build display dataframe
-    disp = grp_sorted.copy()
+
+    # Build a clean DataFrame for display
+    disp_df = grp_sorted.copy()
     # Pretty column titles
-    rename_cols = {"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"}
-    disp = disp.rename(columns=rename_cols)
-    disp["Conversion %"] = disp["Conversion %"].map(lambda x: f"{x:.2f}%")
+    rename_cols = {"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"} 
+    disp_df = disp_df.rename(columns=rename_cols)
+    # Truncate top SKUs for readability
+    def _ellipsize(s, maxlen=120):
+        try:
+            s = str(s)
+            return s if len(s) <= maxlen else s[:maxlen-1] + '…'
+        except Exception:
+            return s
+    disp_df["Top SKUs (purchasers)"] = disp_df["Top SKUs (purchasers)"].apply(lambda x: _ellipsize(x, 90))
+    disp_df["Conversion %"] = disp_df["Conversion %"].map(lambda x: f"{x:.2f}%")
+    # Reorder columns
+    ordered_cols = [*([c for c in group_cols]), "Visitors", "Purchases", "Conversion %", "Top SKUs (purchasers)"]
+    disp_df = disp_df[ordered_cols]
+    st.subheader("📋 Ranked Table")
+    st.dataframe(disp_df, use_container_width=True, hide_index=True)
 
-    # Render table headers manually then rows with a button
-    st.write("Click **Purchases** to view the people list below.")
-    header_cols = group_cols + ["Visitors","Purchases","Conversion %","Top SKUs (purchasers)"]
-    st.write("| " + " | ".join(header_cols + ["Action"]) + " |")
-    st.write("|" + "|".join(["---"]*(len(header_cols)+1)) + "|")
-
-    # ensure session key storage
-    if "focus_combo" not in st.session_state:
-        st.session_state["focus_combo"] = None
-
-    for i, row in disp.iterrows():
-        # Prepare key text for the combo
-        combo_vals = [str(row[c]) for c in group_cols]
-        combo_label = "; ".join([f"{c}={v}" for c,v in zip(group_cols, combo_vals)])
-        purchases_val = int(grp_sorted.loc[i, "purchases"] if "purchases" in grp_sorted.columns else row.get("Purchases", 0))
-        # Build markdown row with a button
-        cols = [str(row.get(c,"")) for c in group_cols] + [str(int(row["Visitors"])), str(purchases_val), row["Conversion %"], row["Top SKUs (purchasers)"]]
-        st.write("| " + " | ".join(cols) + " | " + f"{st.button(f'View ({purchases_val})', key=f'view_{i}') and ''}")
-        if st.session_state.get(f"view_clicked_{i}"):
-            pass  # legacy safeguard
-
-        if st.session_state.get(f"clicked_idx") == i:
-            pass  # unused
-
-        # Capture click
-        if st.session_state.get(f"_clicked_{i}"):
-            pass
-        # Better: handle inline
-        if st.session_state.get(f"focus_combo") is None and purchases_val > 0:
-            pass
-
-        # We need to detect this button click; use a unique key above and capture immediately:
-        if st.session_state.get(f"btn_{i}", False):
+    # Simple selector to focus a row (clean alternative to per-row buttons)
+    combo_labels = []
+    for _, r in disp_df.iterrows():
+        parts = [f"{c}={r[c]}" for c in group_cols] if group_cols != ["__ALL__"] else ["All"]
+        combo_labels.append(f"{' ; '.join(parts)} • Purchases: {int(r['Purchases'])} • Visitors: {int(r['Visitors'])}")
+    if combo_labels:
+        sel_label = st.selectbox("Focus row (optional)", options=["(none)"] + combo_labels, index=0)
+        if sel_label != "(none)":
+            idx = combo_labels.index(sel_label)
+            # Save focus combo
+            row = disp_df.iloc[idx]
+            combo_vals = [str(row[c]) for c in group_cols]
             st.session_state["focus_combo"] = (tuple(zip(group_cols, combo_vals)), group_cols)
-
-    # Button capture workaround: create buttons again with known keys, and set state in a controlled way
-    # We'll re-render buttons properly:
-    # (Re-rendered compact table to include functional buttons)
-    st.markdown("---")
-    st.markdown("### Ranked Results")
-    import itertools
-    st.session_state.setdefault("focus_combo", None)
-
-    # Render proper interactive table rows
-    for i, row in disp.iterrows():
-        with st.container():
-            ccols = st.columns([*([1]*len(group_cols)), 0.6, 0.6, 0.8, 2, 0.8])
-            for idx, gcol in enumerate(group_cols):
-                ccols[idx].markdown(f"**{gcol}**<br/>{row[gcol]}", unsafe_allow_html=True)
-            vi = ccols[len(group_cols)+0].markdown(f"{int(row['Visitors'])}")
-            pi = ccols[len(group_cols)+1].markdown(f"{int(grp_sorted.loc[row.name, 'purchases'])}")
-            ci = ccols[len(group_cols)+2].markdown(f"{row['Conversion %']}")
-            ccols[len(group_cols)+3].markdown(row["Top SKUs (purchasers)"] if isinstance(row["Top SKUs (purchasers)"], str) else "")
-            if ccols[len(group_cols)+4].button("View purchasers", key=f"view2_{i}"):
-                # Save current focus combo
-                combo_vals = [str(row[c]) for c in group_cols]
-                st.session_state["focus_combo"] = (tuple(zip(group_cols, combo_vals)), group_cols)
+    # (Old custom row renderer removed in favor of clean table + selector)
 
     # Reactive purchaser list
     st.markdown("---")
