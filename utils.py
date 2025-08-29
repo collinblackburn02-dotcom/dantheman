@@ -47,13 +47,15 @@ def to_datetime_series(s: pd.Series) -> pd.Series:
     except Exception:
         return pd.to_datetime(pd.Series([None]*len(s)))
 
-def safe_percent(n, d):
-    return 0.0 if (d is None or d == 0) else (n/d)*100.0
-
-def explode_skus(df: pd.DataFrame, skus_col: str, sep: str = ";"):
+def explode_skus(df: pd.DataFrame, skus_col: str, sep_candidates=None):
+    if sep_candidates is None:
+        sep_candidates = [";", ",", "|", "/"]
     d = df[df["_PURCHASE"] == 1].copy()
-    d[skus_col] = d[skus_col].astype(str)
-    d["__sku_list"] = d[skus_col].fillna("").apply(lambda x: [s.strip() for s in str(x).split(sep) if str(s).strip()])
+    d[skus_col] = d[skus_col].astype(str).fillna("")
+    parts = [d[skus_col]]
+    for sep in sep_candidates:
+        d[skus_col] = d[skus_col].str.replace(sep, " ", regex=False)
+    d["__sku_list"] = d[skus_col].str.split()
     d = d.explode("__sku_list")
     d = d.rename(columns={"__sku_list": "__SKU"})
     d = d[d["__SKU"].notna() & (d["__SKU"] != "")]
@@ -67,9 +69,10 @@ def clean_sku_token(tok: str) -> str | None:
         return None
     if " " in s:
         return None
-    # allow A-Z0-9_- only, and must contain a digit OR be ALL CAPS 2–12
+    # allow A-Z0-9_- only
     if re.fullmatch(r"[A-Za-z0-9_-]{2,40}", s) is None:
         return None
+    # must contain digit OR be ALL CAPS 2–12 chars
     has_digit = any(ch.isdigit() for ch in s)
     is_all_caps = s.isupper() and s.isalpha() and 2 <= len(s) <= 12
     if not (has_digit or is_all_caps):
