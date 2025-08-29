@@ -1,4 +1,7 @@
-Email,Gender,Age Range,Income Range,Net Worth,Homeowner,Married,Children,Credit Rating,Purchase,Date,Order Count,First Order Date,Last Order Date,Revenue,SKUs,Most Recent SKU
-a@example.com,Male,25-34,50k-75k,100k-250k,Yes,Yes,No,A,1,2025-06-10,2,2025-06-01,2025-06-10,899.00,RL1;FIR2,RL1
-b@example.com,Female,35-44,75k-100k,250k-500k,No,No,Yes,B,0,,0,,,,,
-c@example.com,Female,45-54,100k-150k,500k-1M,Yes,Yes,Yes,A,1,2025-06-03,1,2025-06-03,2025-06-03,499.00,FIR1,FIR1
+
+Email,Gender,Age Range,Income Range,Net Worth,Homeowner,Married,Children,Credit Rating,Purchase,Date,Order Count,First Order Date,Last Order Date,Revenue,SKUs,Most Recent SKU,PERSONAL_ZIP
+a@example.com,Male,25-34,50k-75k,100k-250k,Yes,Yes,No,A,1,2025-06-10,2,2025-06-01,2025-06-10,899.00,RL1;FIR2,RL1,60601
+b@example.com,Female,35-44,75k-100k,250k-500k,No,No,Yes,B,0,,0,,,,,10001
+c@example.com,Female,45-54,100k-150k,500k-1M,Yes,Yes,Yes,A,1,2025-06-03,1,2025-06-03,2025-06-03,499.00,FIR1,FIR1,30301
+d@example.com,Male,35-44,100k-150k,500k-1M,Yes,No,Yes,A,1,2025-06-08,3,2025-05-20,2025-06-08,1200.00,RL1;RL1;FIR1,RL1,60601
+e@example.com,Female,25-34,50k-75k,100k-250k,No,No,No,C,0,,0,,,,,94105

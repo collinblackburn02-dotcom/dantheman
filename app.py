@@ -3,18 +3,20 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from utils import resolve_col, coerce_purchase_series, safe_percent, to_datetime_series
+from utils import resolve_col, coerce_purchase, to_datetime_series, safe_percent, explode_skus
 
-st.set_page_config(page_title="Merged CSV Dashboard", layout="wide")
+st.set_page_config(page_title="Ranked Customer Dashboard", layout="wide")
 
-st.title("📊 Merged Customer Dashboard")
-st.caption("Upload the merged CSV from Apps Script. Works with either system-style or human-friendly headers.")
+st.title("📊 Ranked Customer Dashboard")
+st.caption("Upload the merged CSV. Choose attributes to rank by; compare any combinations; click Purchases to see people and a reactive ZIP map.")
 
 with st.sidebar:
     uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
     st.markdown("---")
-    st.write("Chart metric")
-    y_metric_mode = st.radio("Y-axis", ["Purchases","Conversion Rate"], horizontal=True)
+    y_metric_mode = st.radio("Metric", ["Conversion %","Purchases","Visitors"], horizontal=False)
+    st.markdown("---")
+    st.write("Optional: upload ZIP centroids CSV (zip,lat,lon) for the map")
+    zip_lookup = st.file_uploader("ZIP centroid CSV", type=["csv"], key="zip")
 
 @st.cache_data(show_spinner=False)
 def load_df(file):
@@ -22,183 +24,308 @@ def load_df(file):
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
-def agg_by_dim(d: pd.DataFrame, dim: str):
-    g = d.groupby(dim, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
-    g["conv_rate"] = (g["purchases"]/g["rows"]).replace([np.inf,-np.inf], np.nan)*100
-    g["conv_rate"] = g["conv_rate"].fillna(0.0)
-    g[dim] = g[dim].astype(str).replace("nan","(blank)")
-    return g
-
-def leaderboard(d: pd.DataFrame, dim: str, sort_metric: str, min_rows: int, top_n: int):
-    g = agg_by_dim(d, dim)
-    g = g[g["rows"] >= min_rows]
-    if g.empty:
-        st.info(f"No groups meet min rows ≥ {min_rows}.")
-        return
-    g_sorted = g.sort_values(sort_metric, ascending=False).head(top_n)
-    show = g_sorted.rename(columns={dim: dim, "rows":"Visitors", "purchases":"Purchases", "conv_rate":"Conversion %"})
-    show["Conversion %"] = show["Conversion %"].map(lambda x: f"{x:.2f}%")
-    st.dataframe(show, use_container_width=True, hide_index=True)
-    y = "purchases" if y_metric_mode == "Purchases" else "conv_rate"
-    y_title = "Purchases" if y == "purchases" else "Conversion Rate (%)"
-    fig = px.bar(g_sorted, x=dim, y=y, text=g_sorted[y].round(2), title=f"Top {top_n} by {'Purchases' if y=='purchases' else 'Conversion %'}")
-    if y == "conv_rate":
-        fig.update_yaxes(title=y_title)
-    st.plotly_chart(fig, use_container_width=True)
-
-def multi_dim_ranker(d: pd.DataFrame, dims: list[str], sort_key: str, min_rows: int, top_n: int, show_all: bool):
-    if not dims:
-        st.info("Choose 1–4 dimensions.")
-        return
-    dims = dims[:4]
-    g = d.groupby(dims, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
-    g["conv_rate"] = (g["purchases"]/g["rows"]).replace([np.inf,-np.inf], np.nan)*100
-    for dim in dims:
-        g[dim] = g[dim].astype(str).replace("nan","(blank)")
-    st.caption(f"Found **{len(g)}** combinations before filters.")
-    g = g[g["rows"] >= min_rows]
-    st.caption(f"**{len(g)}** combinations meet min rows ≥ {min_rows}.")
-    if g.empty:
-        st.info("No combinations after filtering.")
-        return
-    g_sorted = g.sort_values(sort_key, ascending=False)
-    if not show_all:
-        g_sorted = g_sorted.head(top_n)
-    show = g_sorted.rename(columns={"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"})
-    show["Conversion %"] = show["Conversion %"].map(lambda x: f"{x:.2f}%")
-    st.dataframe(show, use_container_width=True, hide_index=True)
-    st.download_button("Download ranked combos", data=g_sorted.to_csv(index=False).encode("utf-8"),
-                       file_name="ranked_combinations.csv", mime="text/csv")
+@st.cache_data(show_spinner=False)
+def load_zip_lookup(file):
+    try:
+        z = pd.read_csv(file, dtype={"zip": str})
+        z["zip"] = z["zip"].str.zfill(5)
+        return z[["zip","lat","lon"]]
+    except Exception:
+        return None
 
 if uploaded:
     df = load_df(uploaded)
 
-    # Resolve columns
+    # Resolve columns (system or human-friendly)
     email_col = resolve_col(df, "EMAIL")
-    purchase_col = resolve_col(df, "PURCHASE")
-    date_col = resolve_col(df, "DATE")
-    order_count_col = resolve_col(df, "ORDER_COUNT")
-    first_date_col = resolve_col(df, "FIRST_ORDER_DATE")
-    last_date_col  = resolve_col(df, "LAST_ORDER_DATE")
-    revenue_col    = resolve_col(df, "REVENUE")
-    skus_col       = resolve_col(df, "SKUS")
-    recent_sku_col = resolve_col(df, "MOST_RECENT_SKU")
-
-    seg_keys = ["AGE_RANGE","CHILDREN","GENDER","HOMEOWNER","MARRIED","NET_WORTH","INCOME_RANGE","CREDIT_RATING"]
-    seg_cols = []
-    for k in seg_keys:
-        c = resolve_col(df, k)
-        if c: seg_cols.append(c)
-
-    if purchase_col is None:
-        st.error("Could not find a Purchase column. Expected one of: PURCHASE, Purchase, purchased, Buyer, is_buyer.")
+    if email_col is None:
+        st.error("Missing email column. Expected one of EMAIL/Email/email.")
         st.stop()
 
-    df["_PURCHASE"] = coerce_purchase_series(df, purchase_col)
+    purchase_col = resolve_col(df, "PURCHASE")
+    if purchase_col is None:
+        st.error("Missing Purchase column. Expected PURCHASE/Purchase/etc.")
+        st.stop()
 
-    # DATE for filters/trend
+    df["_PURCHASE"] = coerce_purchase(df, purchase_col)
+
+    date_col = resolve_col(df, "DATE") or resolve_col(df, "LAST_ORDER_DATE")
     if date_col and date_col in df.columns:
         df["_DATE"] = to_datetime_series(df[date_col])
-    elif last_date_col and last_date_col in df.columns:
-        df["_DATE"] = to_datetime_series(df[last_date_col])
     else:
         df["_DATE"] = pd.NaT
 
-    with st.expander("🔎 Filters", expanded=True):
+    revenue_col = resolve_col(df, "REVENUE")
+    skus_col = resolve_col(df, "SKUS")
+    recent_sku_col = resolve_col(df, "MOST_RECENT_SKU")
+    zip_col = resolve_col(df, "ZIP")
+
+    # Available attributes to choose from
+    candidate_segs = {
+        "Age Range": resolve_col(df, "AGE_RANGE"),
+        "Income Range": resolve_col(df, "INCOME_RANGE"),
+        "Net Worth": resolve_col(df, "NET_WORTH"),
+        "Credit Rating": resolve_col(df, "CREDIT_RATING"),
+        "Gender": resolve_col(df, "GENDER"),
+        "Homeowner": resolve_col(df, "HOMEOWNER"),
+        "Married": resolve_col(df, "MARRIED"),
+        "Children": resolve_col(df, "CHILDREN"),
+    }
+    seg_cols_present = {label:col for label,col in candidate_segs.items() if col is not None}
+
+    with st.expander("🔎 Global Filters", expanded=True):
         dff = df.copy()
-        # Date filter
+        # Date filter (keep undated by default)
         if not dff["_DATE"].dropna().empty:
             mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
-            if pd.notna(mind) and pd.notna(maxd):
-                start, end = st.date_input("Date range", (mind.date(), maxd.date()))
-                include_undated = st.checkbox("Include rows with no date", value=True)
-                if not isinstance(start, tuple):
-                    mask = (dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end)))
-                    if include_undated:
-                        mask = mask | dff["_DATE"].isna()
-                    dff = dff[mask]
+            start, end = st.date_input("Date range", (mind.date(), maxd.date()))
+            include_undated = st.checkbox("Include rows with no date", value=True)
+            if not isinstance(start, tuple):
+                mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
+                if include_undated:
+                    mask = mask | dff["_DATE"].isna()
+                dff = dff[mask]
 
         # SKU contains
         sku_search = st.text_input("SKU contains (optional)")
         if skus_col and sku_search:
             dff = dff[dff[skus_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-        # Recent SKU filter
+        # Most recent SKU filter
         if recent_sku_col:
             opts = sorted([x for x in dff[recent_sku_col].dropna().astype(str).unique() if x.strip()])
             sel = st.multiselect("Most Recent SKU (optional)", opts)
             if sel:
                 dff = dff[dff[recent_sku_col].astype(str).isin(sel)]
 
-        # Revenue slider
+        # Revenue range
         if revenue_col:
             rev = pd.to_numeric(dff[revenue_col], errors="coerce").fillna(0)
-            rmin, rmax = float(rev.min()), float(rev.max())
-            lo, hi = st.slider("Revenue range (sum per person)", min_value=0.0, max_value=max(1.0, rmax), value=(0.0, max(1.0, rmax)))
-            dff = dff[(rev >= lo) & (rev <= hi)]
+            lo, hi = float(rev.min()), float(rev.max())
+            rsel = st.slider("Revenue range (sum per person)", 0.0, max(1.0, hi), (0.0, max(1.0, hi)))
+            dff = dff[(rev >= rsel[0]) & (rev <= rsel[1])]
 
-        # Seg filters
-        for c in seg_cols:
-            opts = sorted([x for x in dff[c].dropna().unique().tolist() if str(x).strip()])
-            sel = st.multiselect(f"Filter by {c}", opts)
-            if sel:
-                dff = dff[dff[c].isin(sel)]
         st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
-    # KPIs
-    total_rows = len(dff)
-    total_p = int(dff["_PURCHASE"].sum())
-    conv = safe_percent(total_p, total_rows)
-    cols = st.columns(4)
-    cols[0].metric("Total People", f"{total_rows:,}")
-    cols[1].metric("Purchases", f"{total_p:,}")
-    cols[2].metric("Conversion Rate", f"{conv:.2f}%")
-    if revenue_col:
-        tot_rev = pd.to_numeric(dff[revenue_col], errors="coerce").fillna(0).sum()
-        cols[3].metric("Total Revenue", f"{tot_rev:,.2f}")
+    # Attribute selection UI
+    st.subheader("Attributes to include in ranking")
+    chosen_attrs = []
+    attr_selections = {}
+    cols = st.columns(3)
+    idx = 0
+    for label, col in seg_cols_present.items():
+        with cols[idx % 3]:
+            use_attr = st.checkbox(f"Include {label}", value=False, key=f"use_{label}")
+            if use_attr:
+                chosen_attrs.append((label, col))
+                # value multiselect (no selection = all)
+                values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+                sel_vals = st.multiselect(f"{label} values", values, default=[])
+                attr_selections[col] = sel_vals
+        idx += 1
 
-    st.markdown("---")
+    # Apply attribute value selections (no selection means include all)
+    for col, sel_vals in attr_selections.items():
+        if sel_vals:
+            dff = dff[dff[col].isin(sel_vals)]
 
-    # Leaderboards
-    st.subheader("🏆 Leaderboards")
-    if seg_cols:
-        left, right = st.columns(2)
-        with left:
-            dim = st.selectbox("Dimension", options=seg_cols, index=0)
-            sort_metric = st.selectbox("Sort by", options=["conv_rate","purchases","rows"], format_func=lambda x: {"conv_rate":"Conversion %","purchases":"Purchases","rows":"Visitors"}[x])
-            min_rows = st.number_input("Min visitors per group", min_value=1, value=30, step=1)
-            top_n = st.slider("Top N", 3, 100, 10, 1)
-            leaderboard(dff, dim, sort_metric, min_rows, top_n)
-        with right:
-            st.markdown("**Multi-D Combinations**")
-            dims = st.multiselect("Choose up to 4", options=seg_cols, default=[seg_cols[0]])
-            metric2 = st.selectbox("Metric", options=["conv_rate","purchases","rows"], index=0, format_func=lambda x: {"conv_rate":"Conversion %","purchases":"Purchases","rows":"Visitors"}[x])
-            min_rows2 = st.number_input("Min visitors per combo", min_value=1, value=20, step=1, key="mr2")
-            top_n2 = st.slider("Top N combos", 3, 500, 50, 1, key="tn2")
-            show_all = st.checkbox("Show ALL combos", value=False)
-            multi_dim_ranker(dff, dims, metric2, min_rows2, top_n2, show_all)
+    # Build ranking
+    st.subheader("🏆 Ranked Conversion Table")
+    left, right = st.columns([1,1])
+    with left:
+        min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
+    with right:
+        top_n = st.slider("Top N", 3, 1000, 100, 1)
+
+    # Grouping
+    group_cols = [col for _, col in chosen_attrs]
+    if not group_cols:
+        group_cols = ["__ALL__"]
+        dff["__ALL__"] = "All"
+
+    grp = dff.groupby(group_cols, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
+    grp["conv_rate"] = (grp["purchases"]/grp["rows"]).replace([np.inf,-np.inf], np.nan)*100
+    grp = grp[grp["rows"] >= min_rows]
+
+    # Build SKU counts per group (from purchasers). If no SKU column, leave blank.
+    if skus_col and skus_col in dff.columns:
+        skux = explode_skus(dff, skus_col)
+        if group_cols != ["__ALL__"]:
+            sku_counts = skux.groupby(group_cols + ["__SKU"]).size().reset_index(name="sku_buyers")
+            top_sku_strings = []
+            # Create a dict key for fast join
+            def key_from_row(row):
+                return tuple(row[g] for g in group_cols)
+            # For each group, collect top SKUs
+            grp_keys = grp[group_cols].apply(lambda r: tuple(r.values.tolist()), axis=1)
+            sku_map = {}
+            for _, r in sku_counts.iterrows():
+                k = tuple(r[g] for g in group_cols)
+                sku_map.setdefault(k, []).append((r["__SKU"], int(r["sku_buyers"])))
+            for k in grp_keys:
+                arr = sorted(sku_map.get(k, []), key=lambda x: x[1], reverse=True)[:10]
+                s = ", ".join([f"{sku} ({cnt})" for sku, cnt in arr]) if arr else ""
+                top_sku_strings.append(s)
+            grp["Top SKUs (purchasers)"] = top_sku_strings
+        else:
+            sku_counts = skux.groupby(["__SKU"]).size().reset_index(name="sku_buyers").sort_values("sku_buyers", ascending=False)
+            s = ", ".join([f"{r['__SKU']} ({int(r['sku_buyers'])})" for _, r in sku_counts.head(10).iterrows()])
+            grp["Top SKUs (purchasers)"] = s
     else:
-        st.info("No segmentation columns detected. Include columns like Gender, Income Range, Net Worth, Homeowner, Credit Rating.")
+        grp["Top SKUs (purchasers)"] = ""
 
+    # Sort by chosen metric
+    sort_key = {"Conversion %":"conv_rate","Purchases":"purchases","Visitors":"rows"}[y_metric_mode]
+    grp_sorted = grp.sort_values(sort_key, ascending=False).head(top_n)
+
+    # Display table with action buttons
+    # Build display dataframe
+    disp = grp_sorted.copy()
+    # Pretty column titles
+    rename_cols = {"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"}
+    disp = disp.rename(columns=rename_cols)
+    disp["Conversion %"] = disp["Conversion %"].map(lambda x: f"{x:.2f}%")
+
+    # Render table headers manually then rows with a button
+    st.write("Click **Purchases** to view the people list below.")
+    header_cols = group_cols + ["Visitors","Purchases","Conversion %","Top SKUs (purchasers)"]
+    st.write("| " + " | ".join(header_cols + ["Action"]) + " |")
+    st.write("|" + "|".join(["---"]*(len(header_cols)+1)) + "|")
+
+    # ensure session key storage
+    if "focus_combo" not in st.session_state:
+        st.session_state["focus_combo"] = None
+
+    for i, row in disp.iterrows():
+        # Prepare key text for the combo
+        combo_vals = [str(row[c]) for c in group_cols]
+        combo_label = "; ".join([f"{c}={v}" for c,v in zip(group_cols, combo_vals)])
+        purchases_val = int(grp_sorted.loc[i, "purchases"] if "purchases" in grp_sorted.columns else row.get("Purchases", 0))
+        # Build markdown row with a button
+        cols = [str(row.get(c,"")) for c in group_cols] + [str(int(row["Visitors"])), str(purchases_val), row["Conversion %"], row["Top SKUs (purchasers)"]]
+        st.write("| " + " | ".join(cols) + " | " + f"{st.button(f'View ({purchases_val})', key=f'view_{i}') and ''}")
+        if st.session_state.get(f"view_clicked_{i}"):
+            pass  # legacy safeguard
+
+        if st.session_state.get(f"clicked_idx") == i:
+            pass  # unused
+
+        # Capture click
+        if st.session_state.get(f"_clicked_{i}"):
+            pass
+        # Better: handle inline
+        if st.session_state.get(f"focus_combo") is None and purchases_val > 0:
+            pass
+
+        # We need to detect this button click; use a unique key above and capture immediately:
+        if st.session_state.get(f"btn_{i}", False):
+            st.session_state["focus_combo"] = (tuple(zip(group_cols, combo_vals)), group_cols)
+
+    # Button capture workaround: create buttons again with known keys, and set state in a controlled way
+    # We'll re-render buttons properly:
+    # (Re-rendered compact table to include functional buttons)
     st.markdown("---")
+    st.markdown("### Ranked Results")
+    import itertools
+    st.session_state.setdefault("focus_combo", None)
 
-    # Trend
-    if not dff["_DATE"].isna().all():
-        st.subheader("📈 Trend Over Time")
-        ts = dff.copy()
-        ts["date_only"] = ts["_DATE"].dt.date
-        line = ts.groupby("date_only")["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
-        line["conv_rate"] = (line["purchases"]/line["rows"])*100
-        y = "purchases" if y_metric_mode == "Purchases" else "conv_rate"
-        y_title = "Purchases" if y == "purchases" else "Conversion Rate (%)"
-        fig = px.line(line, x="date_only", y=y, markers=True, title="Trend Over Time")
-        fig.update_layout(yaxis_title=y_title, xaxis_title="Date", margin=dict(l=10,r=10,b=40,t=60))
-        st.plotly_chart(fig, use_container_width=True)
+    # Render proper interactive table rows
+    for i, row in disp.iterrows():
+        with st.container():
+            ccols = st.columns([*([1]*len(group_cols)), 0.6, 0.6, 0.8, 2, 0.8])
+            for idx, gcol in enumerate(group_cols):
+                ccols[idx].markdown(f"**{gcol}**<br/>{row[gcol]}", unsafe_allow_html=True)
+            vi = ccols[len(group_cols)+0].markdown(f"{int(row['Visitors'])}")
+            pi = ccols[len(group_cols)+1].markdown(f"{int(grp_sorted.loc[row.name, 'purchases'])}")
+            ci = ccols[len(group_cols)+2].markdown(f"{row['Conversion %']}")
+            ccols[len(group_cols)+3].markdown(row["Top SKUs (purchasers)"] if isinstance(row["Top SKUs (purchasers)"], str) else "")
+            if ccols[len(group_cols)+4].button("View purchasers", key=f"view2_{i}"):
+                # Save current focus combo
+                combo_vals = [str(row[c]) for c in group_cols]
+                st.session_state["focus_combo"] = (tuple(zip(group_cols, combo_vals)), group_cols)
 
-    # Table + Export
-    st.subheader("📥 Data (filtered)")
-    st.dataframe(dff, use_container_width=True, height=420)
-    st.download_button("Download filtered CSV", data=dff.to_csv(index=False).encode("utf-8"), file_name="filtered_data.csv", mime="text/csv")
+    # Reactive purchaser list
+    st.markdown("---")
+    st.subheader("👥 Purchasers in selection")
+    focus = st.session_state.get("focus_combo")
+    if focus is not None:
+        pairs, group_cols_current = focus
+        # Build mask
+        mask = dff["_PURCHASE"] == 1
+        for col, val in pairs:
+            if col != "__ALL__":
+                mask = mask & (dff[col].astype(str) == str(val))
+        buyers = dff[mask].copy()
+        st.caption(f"{len(buyers):,} purchasers match: " + "; ".join([f"{col}={val}" for col,val in pairs if col!='__ALL__']))
+
+        # Columns to show
+        cols_to_show = [email_col]
+        if resolve_col(df, "ORDER_COUNT"): cols_to_show.append(resolve_col(df, "ORDER_COUNT"))
+        if resolve_col(df, "LAST_ORDER_DATE"): cols_to_show.append(resolve_col(df, "LAST_ORDER_DATE"))
+        if revenue_col: cols_to_show.append(revenue_col)
+        if recent_sku_col: cols_to_show.append(recent_sku_col)
+        if skus_col: cols_to_show.append(skus_col)
+        # plus active attributes
+        cols_to_show += [c for c in group_cols_current if c != "__ALL__"]
+        cols_to_show = list(dict.fromkeys(cols_to_show))  # dedupe preserve order
+
+        # Pagination
+        page_size = st.selectbox("Rows per page", [25,50,100,200], index=0)
+        page = st.number_input("Page", min_value=1, value=1, step=1)
+        start = (page-1)*page_size
+        end = start + page_size
+        st.dataframe(buyers[cols_to_show].iloc[start:end], use_container_width=True, height=360)
+        st.download_button("Download purchaser list (CSV)", data=buyers[cols_to_show].to_csv(index=False).encode("utf-8"),
+                           file_name="purchasers.csv", mime="text/csv")
+        if st.button("Clear selection"):
+            st.session_state["focus_combo"] = None
+    else:
+        st.info("Click a row's **View purchasers** to see the people list.")
+
+    # ZIP heat/bubble map (reactive)
+    st.markdown("---")
+    st.subheader("🗺️ Purchaser Map by ZIP")
+    if zip_col is None:
+        st.info("No ZIP column detected. Add PERSONAL_ZIP / Billing Zip / Shipping Zip to your merged CSV, or map won't render.")
+    else:
+        # Build current purchaser set (either focused or all filtered purchasers)
+        if focus is not None:
+            pairs, group_cols_current = focus
+            mask = dff["_PURCHASE"] == 1
+            for col, val in pairs:
+                if col != "__ALL__":
+                    mask = mask & (dff[col].astype(str) == str(val))
+            buyers = dff[mask].copy()
+        else:
+            buyers = dff[dff["_PURCHASE"] == 1].copy()
+
+        buyers["__zip5"] = buyers[zip_col].astype(str).str.extract(r"(\d{5})", expand=False)
+        zip_counts = buyers.groupby("__zip5").size().reset_index(name="purchasers")
+        zip_counts = zip_counts[zip_counts["__zip5"].notna()]
+
+        # Get zip centroids
+        zlookup = load_zip_lookup(zip_lookup) if zip_lookup else None
+        if zlookup is None:
+            # Fallback: show top ZIP table and a bar chart instead of map
+            st.warning("ZIP centroid file not provided. Upload a CSV with columns: zip,lat,lon to enable the map.")
+            topz = zip_counts.sort_values("purchasers", ascending=False).head(50)
+            st.dataframe(topz, use_container_width=True, height=320)
+            fig = px.bar(topz, x="__zip5", y="purchasers", title="Top ZIPs by purchasers")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            z = zlookup.copy()
+            merged = pd.merge(zip_counts, z, left_on="__zip5", right_on="zip", how="left")
+            merged = merged.dropna(subset=["lat","lon"])
+            if merged.empty:
+                st.info("No ZIPs matched the centroid file.")
+            else:
+                fig = px.scatter_mapbox(
+                    merged, lat="lat", lon="lon", size="purchasers", color="purchasers",
+                    hover_name="__zip5", hover_data={"purchasers":True, "lat":False, "lon":False},
+                    zoom=3, height=500
+                )
+                fig.update_layout(mapbox_style="open-street-map", margin=dict(l=0,r=0,t=0,b=0))
+                st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("Upload your merged CSV to begin.")
+    st.info("Upload the merged CSV to begin.")
