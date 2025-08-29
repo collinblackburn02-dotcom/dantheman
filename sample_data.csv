@@ -1,0 +1,8 @@
+
+EMAIL,GENDER,AGE_RANGE,INCOME_RANGE,NET_WORTH,HOMEOWNER,SKIPTRACE_CREDIT_RATING,MARRIED,CHILDREN,PURCHASE,DATE
+a@example.com,Male,25-34,50k-75k,100k-250k,Yes,A,Yes,No,1,2025-06-01
+b@example.com,Female,35-44,75k-100k,250k-500k,No,B,No,Yes,0,2025-06-02
+c@example.com,Female,45-54,100k-150k,500k-1M,Yes,A,Yes,Yes,1,2025-06-03
+d@example.com,Male,25-34,50k-75k,100k-250k,Yes,C,No,No,0,2025-06-04
+e@example.com,Male,18-24,<50k,<100k,No,D,No,No,0,2025-06-05
+f@example.com,Female,35-44,75k-100k,250k-500k,Yes,B,Yes,Yes,1,2025-06-06
