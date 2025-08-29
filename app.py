@@ -107,12 +107,16 @@ if uploaded:
     with st.expander("🔎 Filters", expanded=True):
         dff = df.copy()
         # Date filter
-        if not dff["_DATE"].isna().all():
-            mind, maxd = pd.to_datetime(dff["_DATE"].min()), pd.to_datetime(dff["_DATE"].max())
+        if not dff["_DATE"].dropna().empty:
+            mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
             if pd.notna(mind) and pd.notna(maxd):
                 start, end = st.date_input("Date range", (mind.date(), maxd.date()))
+                include_undated = st.checkbox("Include rows with no date", value=True)
                 if not isinstance(start, tuple):
-                    dff = dff[(dff["_DATE"] >= pd.to_datetime(start)) & (dff["_DATE"] <= pd.to_datetime(end))]
+                    mask = (dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end)))
+                    if include_undated:
+                        mask = mask | dff["_DATE"].isna()
+                    dff = dff[mask]
 
         # SKU contains
         sku_search = st.text_input("SKU contains (optional)")
