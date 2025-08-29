@@ -109,7 +109,7 @@ if uploaded:
 
     # Attribute selection UI
     
-    st.subheader("Attributes")
+    st.subheader("Attributes (filters)")
     chosen_attrs = []
     attr_selections = {}
     # For each attribute present, show a dropdown with 'All' + values
@@ -124,6 +124,16 @@ if uploaded:
     for col, sel_vals in attr_selections.items():
         dff = dff[dff[col].isin(sel_vals)]
 
+    # Choose grouping dimensions explicitly (to avoid over-fragmentation)
+    st.subheader("Group by")
+    # Build options as {label: col} but show labels to the user
+    _gb_labels = list(seg_cols_present.keys())
+    _gb_cols = [seg_cols_present[l] for l in _gb_labels]
+    # Default to first attribute if available
+    _default = [_gb_labels[0]] if _gb_labels else []
+    gb_labels = st.multiselect("Dimensions used to build the ranking", options=_gb_labels, default=_default, help="Only these columns will define rows in the ranked table.")
+    group_cols = [seg_cols_present[l] for l in gb_labels]
+
 
     # Build ranking
     st.subheader("🏆 Ranked Conversion Table")
@@ -134,10 +144,9 @@ if uploaded:
         top_n = st.slider("Top N", 3, 1000, 100, 1)
 
     # Grouping
-    group_cols = [col for _, col in chosen_attrs]
     if not group_cols:
-        group_cols = ["__ALL__"]
-        dff["__ALL__"] = "All"
+    group_cols = ["__ALL__"]
+    dff["__ALL__"] = "All"
 
     grp = dff.groupby(group_cols, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
     grp["conv_rate"] = (grp["purchases"]/grp["rows"]).replace([np.inf,-np.inf], np.nan)*100
