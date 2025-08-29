@@ -109,30 +109,35 @@ if uploaded:
 
     # Attribute selection UI
     
-    st.subheader("Attributes (filters)")
-    chosen_attrs = []
-    attr_selections = {}
-    # For each attribute present, show a dropdown with 'All' + values
-    for label, col in seg_cols_present.items():
-        values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-        choice = st.selectbox(label, options=["All"] + values, index=0)
-        if choice != "All":
-            attr_selections[col] = [choice]
-        chosen_attrs.append((label, col))
+    st.subheader("Attributes")
+attr_selections = {}
+group_candidates = []  # attributes where choice == All -> included in grouping
+for label, col in seg_cols_present.items():
+    values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+    choice = st.selectbox(label, options=["All"] + values, index=0, key=f"attr_{label}")
+    if choice != "All":
+        attr_selections[col] = [choice]   # filter to this value
+    else:
+        group_candidates.append((label, col))
 
-    # Apply selections
-    for col, sel_vals in attr_selections.items():
-        dff = dff[dff[col].isin(sel_vals)]
+# Apply filters
+for col, sel_vals in attr_selections.items():
+    dff = dff[dff[col].isin(sel_vals)]
 
-    # Choose grouping dimensions explicitly (to avoid over-fragmentation)
-    st.subheader("Group by")
-    # Build options as {label: col} but show labels to the user
-    _gb_labels = list(seg_cols_present.keys())
-    _gb_cols = [seg_cols_present[l] for l in _gb_labels]
-    # Default to first attribute if available
-    _default = [_gb_labels[0]] if _gb_labels else []
-    gb_labels = st.multiselect("Dimensions used to build the ranking", options=_gb_labels, default=_default, help="Only these columns will define rows in the ranked table.")
-    group_cols = [seg_cols_present[l] for l in gb_labels]
+# Decide grouping columns from candidates (cap to max 5)
+MAX_GROUP_ATTRS = 5
+if len(group_candidates) > MAX_GROUP_ATTRS:
+    st.warning(f"Too many attributes selected for grouping ({{len(group_candidates)}}). Pick up to {MAX_GROUP_ATTRS}.")
+    labels = [lbl for lbl,_ in group_candidates]
+    # sensible default priority order
+    priority = ["Age Range","Income Range","Credit Rating","Net Worth","Homeowner","Gender","Married","Children"]
+    ordered = [lbl for lbl in priority if lbl in labels] + [lbl for lbl in labels if lbl not in priority]
+    default_select = ordered[:MAX_GROUP_ATTRS]
+    chosen_labels = st.multiselect("Group by (choose up to 5)", options=labels, default=default_select)
+    group_cols = [dict(group_candidates)[lbl] for lbl in chosen_labels][:MAX_GROUP_ATTRS]
+else:
+    group_cols = [col for _, col in group_candidates]
+
 
 
     # Build ranking

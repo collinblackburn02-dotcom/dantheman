@@ -63,15 +63,21 @@ def explode_skus(df: pd.DataFrame, skus_col: str, sep: str = ";"):
 
 
 def clean_sku_token(tok: str) -> str | None:
-    if tok is None: 
+    if tok is None:
         return None
     s = str(tok).strip()
-    if not s: 
+    if not s:
         return None
-    # Drop tokens that contain spaces (likely city names / phrases)
+    # drop tokens with spaces
     if " " in s:
         return None
-    # Keep only reasonable SKU characters
+    # enforce simple SKU rules:
+    # - allow A-Z0-9_- only
+    # - must either contain at least one digit OR be ALL CAPS 2-12 chars (e.g., RL2, ECO, FIR1)
     if re.fullmatch(r"[A-Za-z0-9_-]{2,40}", s) is None:
+        return None
+    has_digit = any(ch.isdigit() for ch in s)
+    is_all_caps = s.isupper() and s.isalpha() and 2 <= len(s) <= 12
+    if not (has_digit or is_all_caps):
         return None
     return s
