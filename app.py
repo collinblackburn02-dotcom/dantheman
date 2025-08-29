@@ -29,7 +29,7 @@ if uploaded:
     email_col = resolve_col(df, "EMAIL")
     purchase_col = resolve_col(df, "PURCHASE")
     date_col = resolve_col(df, "DATE")
-    skus_col = resolve_col(df, "SKUS")
+    skus_col = None  # disabled list-based SKU parsing
     recent_sku_col = resolve_col(df, "MOST_RECENT_SKU")
 
     if email_col is None or purchase_col is None:
@@ -80,8 +80,8 @@ if uploaded:
                 sel = st.multiselect("Most Recent SKU", opts)
                 if sel:
                     dff = dff[dff[recent_sku_col].astype(str).isin(sel)]
-        if skus_col and sku_search:
-            dff = dff[dff[skus_col].astype(str).str.contains(sku_search, case=False, na=False)]
+        if recent_sku_col and sku_search:
+            dff = dff[dff[recent_sku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
         # Attribute multiselect filters in a compact 3-col grid
         if seg_cols:
@@ -125,8 +125,9 @@ if uploaded:
     else:
         results_list = []
         # Prepare SKU exploded (from purchasers) once
-        if skus_col and skus_col in dff.columns and not dff[dff["_PURCHASE"]==1].empty:
-            skux = explode_skus(dff, skus_col)
+        if recent_sku_col and recent_sku_col in dff.columns and not dff[dff["_PURCHASE"]==1].empty:
+            skux = dff[dff["_PURCHASE"]==1][[recent_sku_col] + seg_cols].copy()
+            skux = skux.rename(columns={recent_sku_col: "__SKU"})
             skux["__SKU"] = skux["__SKU"].apply(clean_sku_token)
             skux = skux.dropna(subset=["__SKU"])
         else:
@@ -177,7 +178,7 @@ if uploaded:
 
 
     # Pivot SKUs into columns (Top K across filtered data)
-    if skus_col and 'Top SKUs (purchasers)' in results.columns and sku_top_k > 0:
+    if recent_sku_col and 'Top SKUs (purchasers)' in results.columns and sku_top_k > 0:
         # Determine top K SKUs overall
         if 'skux' in locals() and skux is not None and not skux.empty:
             top_overall = skux['__SKU'].value_counts().head(sku_top_k).index.tolist()
