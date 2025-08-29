@@ -145,8 +145,8 @@ if uploaded:
 
     # Grouping
     if not group_cols:
-    group_cols = ["__ALL__"]
-    dff["__ALL__"] = "All"
+        group_cols = ["__ALL__"]
+        dff["__ALL__"] = "All"
 
     grp = dff.groupby(group_cols, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
     grp["conv_rate"] = (grp["purchases"]/grp["rows"]).replace([np.inf,-np.inf], np.nan)*100
