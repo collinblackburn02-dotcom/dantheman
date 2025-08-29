@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from utils import resolve_col, coerce_purchase, to_datetime_series, safe_percent, explode_skus
+from utils import resolve_col, coerce_purchase, to_datetime_series, safe_percent, explode_skus, clean_sku_token
 
 st.set_page_config(page_title="Ranked Customer Dashboard", layout="wide")
 
@@ -108,26 +108,22 @@ if uploaded:
         st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
     # Attribute selection UI
-    st.subheader("Attributes to include in ranking")
+    
+    st.subheader("Attributes")
     chosen_attrs = []
     attr_selections = {}
-    cols = st.columns(3)
-    idx = 0
+    # For each attribute present, show a dropdown with 'All' + values
     for label, col in seg_cols_present.items():
-        with cols[idx % 3]:
-            use_attr = st.checkbox(f"Include {label}", value=False, key=f"use_{label}")
-            if use_attr:
-                chosen_attrs.append((label, col))
-                # value multiselect (no selection = all)
-                values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                sel_vals = st.multiselect(f"{label} values", values, default=[])
-                attr_selections[col] = sel_vals
-        idx += 1
+        values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+        choice = st.selectbox(label, options=["All"] + values, index=0)
+        if choice != "All":
+            attr_selections[col] = [choice]
+        chosen_attrs.append((label, col))
 
-    # Apply attribute value selections (no selection means include all)
+    # Apply selections
     for col, sel_vals in attr_selections.items():
-        if sel_vals:
-            dff = dff[dff[col].isin(sel_vals)]
+        dff = dff[dff[col].isin(sel_vals)]
+
 
     # Build ranking
     st.subheader("🏆 Ranked Conversion Table")
@@ -150,6 +146,9 @@ if uploaded:
     # Build SKU counts per group (from purchasers). If no SKU column, leave blank.
     if skus_col and skus_col in dff.columns:
         skux = explode_skus(dff, skus_col)
+        # clean tokens
+        skux['__SKU'] = skux['__SKU'].apply(clean_sku_token)
+        skux = skux.dropna(subset=['__SKU'])
         if group_cols != ["__ALL__"]:
             sku_counts = skux.groupby(group_cols + ["__SKU"]).size().reset_index(name="sku_buyers")
             top_sku_strings = []
@@ -254,7 +253,7 @@ if uploaded:
 
     # ZIP heat/bubble map (reactive)
     st.markdown("---")
-    st.subheader("🗺️ Purchaser Map by ZIP")
+    st.subheader("🗺️ Purchaser Map by ZIP (filtered)")
     if zip_col is None:
         st.info("No ZIP column detected. Add PERSONAL_ZIP / Billing Zip / Shipping Zip to your merged CSV, or map won't render.")
     else:

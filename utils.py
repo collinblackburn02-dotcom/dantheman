@@ -59,3 +59,18 @@ def explode_skus(df: pd.DataFrame, skus_col: str, sep: str = ";"):
     d = d.rename(columns={"__sku_list": "__SKU"})
     d = d[d["__SKU"].notna() & (d["__SKU"] != "")]
     return d
+
+
+def clean_sku_token(tok: str) -> str | None:
+    if tok is None: 
+        return None
+    s = str(tok).strip()
+    if not s: 
+        return None
+    # Drop tokens that contain spaces (likely city names / phrases)
+    if " " in s:
+        return None
+    # Keep only reasonable SKU characters
+    if re.fullmatch(r"[A-Za-z0-9_-]{2,40}", s) is None:
+        return None
+    return s
