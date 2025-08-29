@@ -15,10 +15,6 @@ ALIASES = {
     "NET_WORTH": ["NET_WORTH","Net Worth","NetWorth"],
     "INCOME_RANGE": ["INCOME_RANGE","Income Range","income_range"],
     "CREDIT_RATING": ["SKIPTRACE_CREDIT_RATING","Credit Rating","credit_rating","SKIPTRACE CREDIT RATING"],
-    "ORDER_COUNT": ["OrderCount","Order Count","Orders","orders"],
-    "FIRST_ORDER_DATE": ["FirstOrderDate","First Order Date"],
-    "LAST_ORDER_DATE": ["LastOrderDate","Last Order Date"],
-    "REVENUE": ["Revenue","Total Revenue","Total"],
     "SKUS": ["SKUs","Sku List","SKU List","Lineitem sku","SKU"],
     "MOST_RECENT_SKU": ["MostRecentSKU","Most Recent SKU","Recent SKU"],
 }
@@ -52,7 +48,6 @@ def explode_skus(df: pd.DataFrame, skus_col: str, sep_candidates=None):
         sep_candidates = [";", ",", "|", "/"]
     d = df[df["_PURCHASE"] == 1].copy()
     d[skus_col] = d[skus_col].astype(str).fillna("")
-    parts = [d[skus_col]]
     for sep in sep_candidates:
         d[skus_col] = d[skus_col].str.replace(sep, " ", regex=False)
     d["__sku_list"] = d[skus_col].str.split()
@@ -69,10 +64,8 @@ def clean_sku_token(tok: str) -> str | None:
         return None
     if " " in s:
         return None
-    # allow A-Z0-9_- only
     if re.fullmatch(r"[A-Za-z0-9_-]{2,40}", s) is None:
         return None
-    # must contain digit OR be ALL CAPS 2–12 chars
     has_digit = any(ch.isdigit() for ch in s)
     is_all_caps = s.isupper() and s.isalpha() and 2 <= len(s) <= 12
     if not (has_digit or is_all_caps):
