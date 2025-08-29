@@ -1,12 +1,12 @@
-import re
 
+import re
 import pandas as pd
 import numpy as np
 
 ALIASES = {
     "EMAIL": ["EMAIL","Email","email"],
     "PURCHASE": ["PURCHASE","Purchase","purchased","Buyer","is_buyer"],
-    "DATE": ["DATE","Date","date"],
+    "DATE": ["DATE","Date","date","Last Order Date","LAST ORDER DATE","LastOrderDate"],
     "AGE_RANGE": ["AGE_RANGE","Age Range","age_range"],
     "CHILDREN": ["CHILDREN","Children"],
     "GENDER": ["GENDER","Gender"],
@@ -19,9 +19,8 @@ ALIASES = {
     "FIRST_ORDER_DATE": ["FirstOrderDate","First Order Date"],
     "LAST_ORDER_DATE": ["LastOrderDate","Last Order Date"],
     "REVENUE": ["Revenue","Total Revenue","Total"],
-    "SKUS": ["SKUs","Sku List","SKU List"],
+    "SKUS": ["SKUs","Sku List","SKU List","Lineitem sku","SKU"],
     "MOST_RECENT_SKU": ["MostRecentSKU","Most Recent SKU","Recent SKU"],
-    "ZIP": ["PERSONAL_ZIP","Billing Zip","Shipping Zip","Zip","ZIP","Postal Code"]
 }
 
 def resolve_col(df: pd.DataFrame, key: str) -> str | None:
@@ -52,7 +51,6 @@ def safe_percent(n, d):
     return 0.0 if (d is None or d == 0) else (n/d)*100.0
 
 def explode_skus(df: pd.DataFrame, skus_col: str, sep: str = ";"):
-    # Returns rows duplicated per SKU value for purchasers (Purchase==1)
     d = df[df["_PURCHASE"] == 1].copy()
     d[skus_col] = d[skus_col].astype(str)
     d["__sku_list"] = d[skus_col].fillna("").apply(lambda x: [s.strip() for s in str(x).split(sep) if str(s).strip()])
@@ -61,19 +59,15 @@ def explode_skus(df: pd.DataFrame, skus_col: str, sep: str = ";"):
     d = d[d["__SKU"].notna() & (d["__SKU"] != "")]
     return d
 
-
 def clean_sku_token(tok: str) -> str | None:
     if tok is None:
         return None
     s = str(tok).strip()
     if not s:
         return None
-    # drop tokens with spaces
     if " " in s:
         return None
-    # enforce simple SKU rules:
-    # - allow A-Z0-9_- only
-    # - must either contain at least one digit OR be ALL CAPS 2-12 chars (e.g., RL2, ECO, FIR1)
+    # allow A-Z0-9_- only, and must contain a digit OR be ALL CAPS 2–12
     if re.fullmatch(r"[A-Za-z0-9_-]{2,40}", s) is None:
         return None
     has_digit = any(ch.isdigit() for ch in s)

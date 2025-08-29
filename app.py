@@ -8,15 +8,12 @@ from utils import resolve_col, coerce_purchase, to_datetime_series, safe_percent
 st.set_page_config(page_title="Ranked Customer Dashboard", layout="wide")
 
 st.title("📊 Ranked Customer Dashboard")
-st.caption("Upload the merged CSV. Choose attributes to rank by; compare any combinations; click Purchases to see people and a reactive ZIP map.")
+st.caption("Upload the merged CSV. Use attribute dropdowns (All = group; pick value = filter). Ranks every combo by your chosen metric.")
 
 with st.sidebar:
     uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
     st.markdown("---")
-    y_metric_mode = st.radio("Metric", ["Conversion %","Purchases","Visitors"], horizontal=False)
-    st.markdown("---")
-    st.write("Optional: upload ZIP centroids CSV (zip,lat,lon) for the map")
-    zip_lookup = st.file_uploader("ZIP centroid CSV", type=["csv"], key="zip")
+    metric_choice = st.radio("Sort metric", ["Conversion %","Purchases","Visitors"], horizontal=False)
 
 @st.cache_data(show_spinner=False)
 def load_df(file):
@@ -24,27 +21,14 @@ def load_df(file):
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
-@st.cache_data(show_spinner=False)
-def load_zip_lookup(file):
-    try:
-        z = pd.read_csv(file, dtype={"zip": str})
-        z["zip"] = z["zip"].str.zfill(5)
-        return z[["zip","lat","lon"]]
-    except Exception:
-        return None
-
 if uploaded:
     df = load_df(uploaded)
 
-    # Resolve columns (system or human-friendly)
+    # Resolve columns
     email_col = resolve_col(df, "EMAIL")
-    if email_col is None:
-        st.error("Missing email column. Expected one of EMAIL/Email/email.")
-        st.stop()
-
     purchase_col = resolve_col(df, "PURCHASE")
-    if purchase_col is None:
-        st.error("Missing Purchase column. Expected PURCHASE/Purchase/etc.")
+    if email_col is None or purchase_col is None:
+        st.error("Missing EMAIL or PURCHASE column.")
         st.stop()
 
     df["_PURCHASE"] = coerce_purchase(df, purchase_col)
@@ -55,12 +39,10 @@ if uploaded:
     else:
         df["_DATE"] = pd.NaT
 
-    revenue_col = resolve_col(df, "REVENUE")
     skus_col = resolve_col(df, "SKUS")
     recent_sku_col = resolve_col(df, "MOST_RECENT_SKU")
-    zip_col = resolve_col(df, "ZIP")
 
-    # Available attributes to choose from
+    # Attribute candidates
     candidate_segs = {
         "Age Range": resolve_col(df, "AGE_RANGE"),
         "Income Range": resolve_col(df, "INCOME_RANGE"),
@@ -71,11 +53,11 @@ if uploaded:
         "Married": resolve_col(df, "MARRIED"),
         "Children": resolve_col(df, "CHILDREN"),
     }
-    seg_cols_present = {label:col for label,col in candidate_segs.items() if col is not None}
+    seg_cols_present = {lbl: col for lbl, col in candidate_segs.items() if col is not None}
 
+    # Global Filters
     with st.expander("🔎 Global Filters", expanded=True):
         dff = df.copy()
-        # Date filter (keep undated by default)
         if not dff["_DATE"].dropna().empty:
             mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
             start, end = st.date_input("Date range", (mind.date(), maxd.date()))
@@ -86,229 +68,97 @@ if uploaded:
                     mask = mask | dff["_DATE"].isna()
                 dff = dff[mask]
 
-        # SKU contains
         sku_search = st.text_input("SKU contains (optional)")
         if skus_col and sku_search:
             dff = dff[dff[skus_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-        # Most recent SKU filter
         if recent_sku_col:
             opts = sorted([x for x in dff[recent_sku_col].dropna().astype(str).unique() if x.strip()])
             sel = st.multiselect("Most Recent SKU (optional)", opts)
             if sel:
                 dff = dff[dff[recent_sku_col].astype(str).isin(sel)]
 
-        # Revenue range
-        if revenue_col:
-            rev = pd.to_numeric(dff[revenue_col], errors="coerce").fillna(0)
-            lo, hi = float(rev.min()), float(rev.max())
-            rsel = st.slider("Revenue range (sum per person)", 0.0, max(1.0, hi), (0.0, max(1.0, hi)))
-            dff = dff[(rev >= rsel[0]) & (rev <= rsel[1])]
-
         st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
-    # Attribute selection UI
-    
+    # Attributes (All=group; specific=filter)
     st.subheader("Attributes")
-attr_selections = {}
-group_candidates = []  # attributes where choice == All -> included in grouping
-for label, col in seg_cols_present.items():
-    values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-    choice = st.selectbox(label, options=["All"] + values, index=0, key=f"attr_{label}")
-    if choice != "All":
-        attr_selections[col] = [choice]   # filter to this value
+    attr_selections = {}
+    group_candidates = []
+    for label, col in seg_cols_present.items():
+        values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+        choice = st.selectbox(label, options=["All"] + values, index=0, key=f"attr_{label}")
+        if choice != "All":
+            attr_selections[col] = [choice]   # filter
+        else:
+            group_candidates.append((label, col))
+
+    # Apply selected filters
+    for col, sel_vals in attr_selections.items():
+        dff = dff[dff[col].isin(sel_vals)]
+
+    # Determine group columns
+    MAX_GROUP_ATTRS = 5
+    if len(group_candidates) > MAX_GROUP_ATTRS:
+        st.warning(f"Too many attributes on 'All' ({{len(group_candidates)}}). Pick up to {MAX_GROUP_ATTRS} to define rows.")
+        labels = [lbl for lbl,_ in group_candidates]
+        priority = ["Age Range","Income Range","Credit Rating","Net Worth","Homeowner","Gender","Married","Children"]
+        ordered = [lbl for lbl in priority if lbl in labels] + [lbl for lbl in labels if lbl not in priority]
+        default_select = ordered[:MAX_GROUP_ATTRS]
+        chosen_labels = st.multiselect("Group by", options=labels, default=default_select, help="These columns define the row combinations.")
+        group_cols = [dict(group_candidates)[lbl] for lbl in chosen_labels][:MAX_GROUP_ATTRS]
     else:
-        group_candidates.append((label, col))
+        group_cols = [col for _, col in group_candidates]
 
-# Apply filters
-for col, sel_vals in attr_selections.items():
-    dff = dff[dff[col].isin(sel_vals)]
-
-# Decide grouping columns from candidates (cap to max 5)
-MAX_GROUP_ATTRS = 5
-if len(group_candidates) > MAX_GROUP_ATTRS:
-    st.warning(f"Too many attributes selected for grouping ({{len(group_candidates)}}). Pick up to {MAX_GROUP_ATTRS}.")
-    labels = [lbl for lbl,_ in group_candidates]
-    # sensible default priority order
-    priority = ["Age Range","Income Range","Credit Rating","Net Worth","Homeowner","Gender","Married","Children"]
-    ordered = [lbl for lbl in priority if lbl in labels] + [lbl for lbl in labels if lbl not in priority]
-    default_select = ordered[:MAX_GROUP_ATTRS]
-    chosen_labels = st.multiselect("Group by (choose up to 5)", options=labels, default=default_select)
-    group_cols = [dict(group_candidates)[lbl] for lbl in chosen_labels][:MAX_GROUP_ATTRS]
-else:
-    group_cols = [col for _, col in group_candidates]
-
-
-
-    # Build ranking
-    st.subheader("🏆 Ranked Conversion Table")
-    left, right = st.columns([1,1])
-    with left:
-        min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
-    with right:
-        top_n = st.slider("Top N", 3, 1000, 100, 1)
-
-    # Grouping
     if not group_cols:
         group_cols = ["__ALL__"]
         dff["__ALL__"] = "All"
 
-    grp = dff.groupby(group_cols, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
-    grp["conv_rate"] = (grp["purchases"]/grp["rows"]).replace([np.inf,-np.inf], np.nan)*100
-    grp = grp[grp["rows"] >= min_rows]
+    # Controls
+    st.subheader("🏆 Ranked Conversion Table")
+    c1, c2 = st.columns(2)
+    with c1:
+        min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
+    with c2:
+        top_n = st.slider("Top N", 3, 2000, 100, 1)
 
-    # Build SKU counts per group (from purchasers). If no SKU column, leave blank.
-    if skus_col and skus_col in dff.columns:
+    # Build groups
+    g = dff.groupby(group_cols, dropna=False)["_PURCHASE"].agg(rows="count", purchases="sum").reset_index()
+    g["conv_rate"] = (g["purchases"]/g["rows"]).replace([np.inf,-np.inf], np.nan)*100
+    g = g[g["rows"] >= min_rows]
+
+    # Top SKUs per group
+    if skus_col and skus_col in dff.columns and not dff[dff["_PURCHASE"]==1].empty:
         skux = explode_skus(dff, skus_col)
-        # clean tokens
-        skux['__SKU'] = skux['__SKU'].apply(clean_sku_token)
-        skux = skux.dropna(subset=['__SKU'])
+        skux["__SKU"] = skux["__SKU"].apply(clean_sku_token)
+        skux = skux.dropna(subset=["__SKU"])
         if group_cols != ["__ALL__"]:
             sku_counts = skux.groupby(group_cols + ["__SKU"]).size().reset_index(name="sku_buyers")
-            top_sku_strings = []
-            # Create a dict key for fast join
-            def key_from_row(row):
-                return tuple(row[g] for g in group_cols)
-            # For each group, collect top SKUs
-            grp_keys = grp[group_cols].apply(lambda r: tuple(r.values.tolist()), axis=1)
-            sku_map = {}
+            # map from group key -> list of (sku, count)
+            tmp = {}
             for _, r in sku_counts.iterrows():
-                k = tuple(r[g] for g in group_cols)
-                sku_map.setdefault(k, []).append((r["__SKU"], int(r["sku_buyers"])))
-            for k in grp_keys:
-                arr = sorted(sku_map.get(k, []), key=lambda x: x[1], reverse=True)[:10]
-                s = ", ".join([f"{sku} ({cnt})" for sku, cnt in arr]) if arr else ""
-                top_sku_strings.append(s)
-            grp["Top SKUs (purchasers)"] = top_sku_strings
+                key = tuple(r[c] for c in group_cols)
+                tmp.setdefault(key, []).append((r["__SKU"], int(r["sku_buyers"])))
+            top_skus = []
+            for _, r in g.iterrows():
+                key = tuple(r[c] for c in group_cols)
+                arr = sorted(tmp.get(key, []), key=lambda x: x[1], reverse=True)[:10]
+                top_skus.append(", ".join([f"{sku} ({cnt})" for sku, cnt in arr]) if arr else "")
+            g["Top SKUs (purchasers)"] = top_skus
         else:
             sku_counts = skux.groupby(["__SKU"]).size().reset_index(name="sku_buyers").sort_values("sku_buyers", ascending=False)
-            s = ", ".join([f"{r['__SKU']} ({int(r['sku_buyers'])})" for _, r in sku_counts.head(10).iterrows()])
-            grp["Top SKUs (purchasers)"] = s
+            g["Top SKUs (purchasers)"] = ", ".join([f"{r['__SKU']} ({int(r['sku_buyers'])})" for _, r in sku_counts.head(10).iterrows()])
     else:
-        grp["Top SKUs (purchasers)"] = ""
+        g["Top SKUs (purchasers)"] = ""
 
-    # Sort by chosen metric
-    sort_key = {"Conversion %":"conv_rate","Purchases":"purchases","Visitors":"rows"}[y_metric_mode]
-    grp_sorted = grp.sort_values(sort_key, ascending=False).head(top_n)
+    # Sort and display
+    sort_key = {"Conversion %":"conv_rate","Purchases":"purchases","Visitors":"rows"}[metric_choice]
+    g_sorted = g.sort_values(sort_key, ascending=False).head(top_n)
 
-
-    # Build a clean DataFrame for display
-    disp_df = grp_sorted.copy()
-    # Pretty column titles
-    rename_cols = {"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"} 
-    disp_df = disp_df.rename(columns=rename_cols)
-    # Truncate top SKUs for readability
-    def _ellipsize(s, maxlen=120):
-        try:
-            s = str(s)
-            return s if len(s) <= maxlen else s[:maxlen-1] + '…'
-        except Exception:
-            return s
-    disp_df["Top SKUs (purchasers)"] = disp_df["Top SKUs (purchasers)"].apply(lambda x: _ellipsize(x, 90))
-    disp_df["Conversion %"] = disp_df["Conversion %"].map(lambda x: f"{x:.2f}%")
-    # Reorder columns
-    ordered_cols = [*([c for c in group_cols]), "Visitors", "Purchases", "Conversion %", "Top SKUs (purchasers)"]
-    disp_df = disp_df[ordered_cols]
-    st.subheader("📋 Ranked Table")
-    st.dataframe(disp_df, use_container_width=True, hide_index=True)
-
-    # Simple selector to focus a row (clean alternative to per-row buttons)
-    combo_labels = []
-    for _, r in disp_df.iterrows():
-        parts = [f"{c}={r[c]}" for c in group_cols] if group_cols != ["__ALL__"] else ["All"]
-        combo_labels.append(f"{' ; '.join(parts)} • Purchases: {int(r['Purchases'])} • Visitors: {int(r['Visitors'])}")
-    if combo_labels:
-        sel_label = st.selectbox("Focus row (optional)", options=["(none)"] + combo_labels, index=0)
-        if sel_label != "(none)":
-            idx = combo_labels.index(sel_label)
-            # Save focus combo
-            row = disp_df.iloc[idx]
-            combo_vals = [str(row[c]) for c in group_cols]
-            st.session_state["focus_combo"] = (tuple(zip(group_cols, combo_vals)), group_cols)
-    # (Old custom row renderer removed in favor of clean table + selector)
-
-    # Reactive purchaser list
-    st.markdown("---")
-    st.subheader("👥 Purchasers in selection")
-    focus = st.session_state.get("focus_combo")
-    if focus is not None:
-        pairs, group_cols_current = focus
-        # Build mask
-        mask = dff["_PURCHASE"] == 1
-        for col, val in pairs:
-            if col != "__ALL__":
-                mask = mask & (dff[col].astype(str) == str(val))
-        buyers = dff[mask].copy()
-        st.caption(f"{len(buyers):,} purchasers match: " + "; ".join([f"{col}={val}" for col,val in pairs if col!='__ALL__']))
-
-        # Columns to show
-        cols_to_show = [email_col]
-        if resolve_col(df, "ORDER_COUNT"): cols_to_show.append(resolve_col(df, "ORDER_COUNT"))
-        if resolve_col(df, "LAST_ORDER_DATE"): cols_to_show.append(resolve_col(df, "LAST_ORDER_DATE"))
-        if revenue_col: cols_to_show.append(revenue_col)
-        if recent_sku_col: cols_to_show.append(recent_sku_col)
-        if skus_col: cols_to_show.append(skus_col)
-        # plus active attributes
-        cols_to_show += [c for c in group_cols_current if c != "__ALL__"]
-        cols_to_show = list(dict.fromkeys(cols_to_show))  # dedupe preserve order
-
-        # Pagination
-        page_size = st.selectbox("Rows per page", [25,50,100,200], index=0)
-        page = st.number_input("Page", min_value=1, value=1, step=1)
-        start = (page-1)*page_size
-        end = start + page_size
-        st.dataframe(buyers[cols_to_show].iloc[start:end], use_container_width=True, height=360)
-        st.download_button("Download purchaser list (CSV)", data=buyers[cols_to_show].to_csv(index=False).encode("utf-8"),
-                           file_name="purchasers.csv", mime="text/csv")
-        if st.button("Clear selection"):
-            st.session_state["focus_combo"] = None
-    else:
-        st.info("Click a row's **View purchasers** to see the people list.")
-
-    # ZIP heat/bubble map (reactive)
-    st.markdown("---")
-    st.subheader("🗺️ Purchaser Map by ZIP (filtered)")
-    if zip_col is None:
-        st.info("No ZIP column detected. Add PERSONAL_ZIP / Billing Zip / Shipping Zip to your merged CSV, or map won't render.")
-    else:
-        # Build current purchaser set (either focused or all filtered purchasers)
-        if focus is not None:
-            pairs, group_cols_current = focus
-            mask = dff["_PURCHASE"] == 1
-            for col, val in pairs:
-                if col != "__ALL__":
-                    mask = mask & (dff[col].astype(str) == str(val))
-            buyers = dff[mask].copy()
-        else:
-            buyers = dff[dff["_PURCHASE"] == 1].copy()
-
-        buyers["__zip5"] = buyers[zip_col].astype(str).str.extract(r"(\d{5})", expand=False)
-        zip_counts = buyers.groupby("__zip5").size().reset_index(name="purchasers")
-        zip_counts = zip_counts[zip_counts["__zip5"].notna()]
-
-        # Get zip centroids
-        zlookup = load_zip_lookup(zip_lookup) if zip_lookup else None
-        if zlookup is None:
-            # Fallback: show top ZIP table and a bar chart instead of map
-            st.warning("ZIP centroid file not provided. Upload a CSV with columns: zip,lat,lon to enable the map.")
-            topz = zip_counts.sort_values("purchasers", ascending=False).head(50)
-            st.dataframe(topz, use_container_width=True, height=320)
-            fig = px.bar(topz, x="__zip5", y="purchasers", title="Top ZIPs by purchasers")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            z = zlookup.copy()
-            merged = pd.merge(zip_counts, z, left_on="__zip5", right_on="zip", how="left")
-            merged = merged.dropna(subset=["lat","lon"])
-            if merged.empty:
-                st.info("No ZIPs matched the centroid file.")
-else:
-                fig = px.scatter_mapbox(
-                    merged, lat="lat", lon="lon", size="purchasers", color="purchasers",
-                    hover_name="__zip5", hover_data={"purchasers":True, "lat":False, "lon":False},
-                    zoom=3, height=500
-                )
-                fig.update_layout(mapbox_style="open-street-map", margin=dict(l=0,r=0,t=0,b=0))
-                st.plotly_chart(fig, use_container_width=True)
+    disp = g_sorted.rename(columns={"rows":"Visitors","purchases":"Purchases","conv_rate":"Conversion %"})
+    disp["Conversion %"] = disp["Conversion %"].map(lambda x: f"{x:.2f}%")
+    ordered_cols = group_cols + ["Visitors","Purchases","Conversion %","Top SKUs (purchasers)"]
+    disp = disp[ordered_cols]
+    st.dataframe(disp, use_container_width=True, hide_index=True)
 
 else:
     st.info("Upload the merged CSV to begin.")
