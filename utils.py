@@ -6,10 +6,8 @@ PURCHASE_GUESS_CANDIDATES = ["PURCHASE", "Purchase", "purchased", "purchasers", 
 
 def coerce_purchase_series(df: pd.DataFrame, purchase_col: str) -> pd.Series:
     s = df[purchase_col]
-    # Numeric -> purchased if >0
     if np.issubdtype(s.dtype, np.number):
         return (s.fillna(0) > 0).astype(int)
-    # Bool-ish strings
     s_str = s.astype(str).str.strip().str.lower()
     true_vals = {"1","true","yes","y","t","buyer","purchased"}
     return s_str.isin(true_vals).astype(int)
@@ -19,7 +17,6 @@ def pick_default_purchase_col(df: pd.DataFrame) -> str | None:
     for guess in PURCHASE_GUESS_CANDIDATES:
         if guess in cols:
             return guess
-    # Heuristic: any column containing 'order' or 'purchase'
     for c in df.columns:
         lc = c.lower()
         if "order" in lc or "purchase" in lc or "buyer" in lc:
