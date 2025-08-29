@@ -301,7 +301,7 @@ else:
             merged = merged.dropna(subset=["lat","lon"])
             if merged.empty:
                 st.info("No ZIPs matched the centroid file.")
-            else:
+else:
                 fig = px.scatter_mapbox(
                     merged, lat="lat", lon="lon", size="purchasers", color="purchasers",
                     hover_name="__zip5", hover_data={"purchasers":True, "lat":False, "lon":False},
