@@ -14,7 +14,7 @@ except Exception:
     pass
 
 st.title("✨ Heavenly Health — Customer Insights")
-st.caption("Ranked customer segments using DISTINCT visitors. Clean headers. SKUs on the right.")
+st.caption("Ranked customer segments using one row per email (accurate conversion), clean headers, and SKUs on the right.")
 
 with st.sidebar:
     st.image("logo.png", use_column_width=True)
@@ -29,8 +29,6 @@ with st.sidebar:
     max_depth = st.slider("Max combo depth", 1, 4, 2, 1)
     top_n = st.slider("Top N", 10, 1000, 50, 10)
     min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
-    st.markdown("---")
-    max_levels = st.slider("Max unique values per attribute (cap)", 2, 200, 50, 1)
     st.markdown("---")
     cache_ttl = st.number_input("Cache (minutes) for GitHub file", min_value=0, value=15, step=5)
     reload_clicked = st.button("🔄 Force Reload")
@@ -68,6 +66,7 @@ if df is None:
     st.info("Paste a GitHub RAW CSV URL or upload a file to begin.")
     st.stop()
 
+# --- Resolve columns ---
 email_col = resolve_col(df, "EMAIL")
 purchase_col = resolve_col(df, "PURCHASE")
 date_col = resolve_col(df, "DATE")
@@ -78,6 +77,7 @@ if email_col is None or purchase_col is None:
     st.error("Missing EMAIL or PURCHASE column.")
     st.stop()
 
+# Purchase as 0/1
 s = df[purchase_col]
 if pd.api.types.is_numeric_dtype(s):
     df["_PURCHASE"] = (s.fillna(0) > 0).astype(int)
@@ -85,6 +85,8 @@ else:
     vals = s.astype(str).str.strip().str.lower()
     yes = {"1","true","t","yes","y","buyer","purchased"}
     df["_PURCHASE"] = vals.isin(yes).astype(int)
+
+# Date & Revenue
 if date_col:
     try:
         df["_DATE"] = pd.to_datetime(df[date_col], errors="coerce")
@@ -94,6 +96,7 @@ else:
     df["_DATE"] = pd.NaT
 df["_REVENUE"] = pd.to_numeric(df[revenue_col], errors="coerce").fillna(0.0) if revenue_col else 0.0
 
+# Friendly attribute map (NOTE: MOST_RECENT_SKU is NOT an attribute for grouping)
 seg_map = {
     "Age": resolve_col(df,"AGE_RANGE"),
     "Income": resolve_col(df,"INCOME_RANGE"),
@@ -105,15 +108,19 @@ seg_map = {
     "Children": resolve_col(df,"CHILDREN"),
     "State": state_col,
 }
-seg_map = {k:v for k,v in seg_map.items() if v is not None}
+seg_map = {disp: col for disp, col in seg_map.items() if col is not None}
 seg_cols = list(seg_map.values())
-friendly_label = {v:k for k,v in seg_map.items()}
+friendly_label = {v: k for k, v in seg_map.items()}
 
+# --- Filters ---
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
-    for disp,col in seg_map.items():
+    # Treat 'U' as missing for Gender and Credit
+    for disp, col in seg_map.items():
         if disp in ("Gender","Credit rating") and col in dff.columns:
             dff.loc[dff[col].astype(str).str.upper().str.strip()=="U", col] = pd.NA
+
+    # Date filter
     if not dff["_DATE"].dropna().empty:
         mind = pd.to_datetime(dff["_DATE"].dropna().min())
         maxd = pd.to_datetime(dff["_DATE"].dropna().max())
@@ -127,25 +134,18 @@ with st.expander("🔎 Filters", expanded=True):
             if include_undated:
                 mask |= dff["_DATE"].isna()
             dff = dff[mask]
+
+    # SKU contains
     sku_search = st.text_input("Most Recent SKU contains (optional)")
     if msku_col and sku_search:
         dff = dff[dff[msku_col].astype(str).str.contains(sku_search,case=False,na=False)]
-    too_tall = []
-    for disp,col in seg_map.items():
-        nlv = dff[col].nunique(dropna=True)
-        if nlv>max_levels:
-            too_tall.append(disp)
-    if too_tall:
-        st.warning("Skipped attributes: "+", ".join(too_tall))
-        seg_cols_capped = [c for d,c in seg_map.items() if d not in too_tall]
-    else:
-        seg_cols_capped = seg_cols
+
+    # Attribute filters (no cap)
     selections={}; include_flags={}
-    if seg_cols_capped:
+    if seg_cols:
         st.markdown("**Attributes**")
         cols = st.columns(3); idx=0
         for disp,col in seg_map.items():
-            if col not in seg_cols_capped: continue
             with cols[idx%3]:
                 mode = st.selectbox(f"{disp}: mode",["Include","Do not include"],0,key=f"mode_{disp}")
                 include_flags[col] = (mode=="Include")
@@ -155,16 +155,21 @@ with st.expander("🔎 Filters", expanded=True):
             idx+=1
         for col,vals in selections.items():
             dff = dff[dff[col].isin(vals)]
+
     st.caption(f"Rows after filters: {len(dff):,} / {len(df):,}")
 
+# --- Deduplicate to one row per email (latest by date) ---
 if date_col:
     dff_sorted = dff.sort_values(by="_DATE",ascending=False,kind="mergesort")
 else:
     dff_sorted = dff.copy()
 dff_one = dff_sorted.drop_duplicates(subset=[email_col],keep="first").reset_index(drop=True)
 
-con=duckdb.connect(); con.register("t",dff_one)
-include_cols=[c for c in seg_cols_capped if include_flags.get(c,True)]
+# --- DuckDB compute on deduped table ---
+con = duckdb.connect()
+con.register("t", dff_one)
+
+include_cols=[c for c in seg_cols if include_flags.get(c,True)]
 attrs=[c for c in include_cols if c in dff_one.columns]
 required_cols=[col for col,vals in selections.items() if vals and include_flags.get(col,True)]
 req_set=set(required_cols)
@@ -172,16 +177,17 @@ sets=[]
 for d in range(1,max_depth+1):
     for combo in combinations(attrs,d):
         if req_set.issubset(set(combo)):
-            sets.append("("+",".join([f'"{c}"' for c in combo])+")")
+            sets.append("(" + ",".join([f'"{c}"' for c in combo]) + ")")
 if not sets:
     if required_cols:
-        sets.append("("+",".join([f'"{c}"' for c in required_cols])+")")
+        sets.append("(" + ",".join([f'"{c}"' for c in required_cols]) + ")")
     elif attrs:
-        sets.append("("+",".join([f'"{c}"' for c in attrs[:1]])+")")
+        sets.append("(" + ",".join([f'"{c}"' for c in attrs[:1]]) + ")")
     else:
         sets.append("()")
-grouping_sets_sql=",\n".join(sets)
+grouping_sets_sql = ",\n".join(sets)
 
+# Top SKUs globally (on deduped table) — NOT a grouping attribute
 sku_sums=""; sku_cols_order=[]
 if msku_col and msku_col in dff_one.columns:
     top_skus = con.execute(f"""
@@ -191,18 +197,23 @@ if msku_col and msku_col in dff_one.columns:
         GROUP BY 1 ORDER BY buyers DESC LIMIT 11
     """).fetchdf()["sku"].astype(str).tolist()
     if top_skus:
-        sku_cols_order=top_skus; parts=[]
+        sku_cols_order = top_skus
+        parts = []
         for sku in top_skus:
-            s_escaped=sku.replace("'", "''")
+            s_escaped = sku.replace("'", "''")
             parts.append(
                 'SUM(CASE WHEN "{msku}"=\'{sku}\' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS "{label}"'
                 .format(msku=msku_col, sku=s_escaped, label=sku)
             )
-        sku_sums=",\n  "+",\n  ".join(parts)
+        sku_sums = ",\n  " + ",\n  ".join(parts)
 
-depth_expr=" + ".join([f'CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END' for c in attrs]) if attrs else "0"
+# Depth expression
+depth_expr = " + ".join([f'CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END' for c in attrs]) if attrs else "0"
+
+# SELECT builder
 select_parts=[]
-if attrs: select_parts.extend([f'"{c}"' for c in attrs])
+if attrs:
+    select_parts.extend([f'"{c}"' for c in attrs])
 select_parts.append("COUNT(*) AS Visitors")
 select_parts.append("SUM(_PURCHASE) AS Purchases")
 select_parts.append("100.0 * SUM(_PURCHASE)/NULLIF(COUNT(*),0) AS conv_rate")
@@ -211,59 +222,95 @@ if revenue_col:
     select_parts.append("SUM(_REVENUE) AS revenue")
     select_parts.append("1.0*SUM(_REVENUE)/NULLIF(COUNT(*),0) AS rpv")
 else:
-    select_parts.append("0.0 AS revenue"); select_parts.append("0.0 AS rpv")
-if sku_sums: select_parts.append(sku_sums.lstrip(",\n "))
-select_clause=",\n  ".join(select_parts)
+    select_parts.append("0.0 AS revenue")
+    select_parts.append("0.0 AS rpv")
+if sku_sums:
+    select_parts.append(sku_sums.lstrip(",\n "))
+select_clause = ",\n  ".join(select_parts)
 
-sql=f"""
+sql = f"""
 SELECT
   {select_clause}
 FROM t
-{'GROUP BY GROUPING SETS ('+grouping_sets_sql+')' if attrs else ''}
+{'GROUP BY GROUPING SETS (' + grouping_sets_sql + ')' if attrs else ''}
 HAVING COUNT(*) >= ?
 """
 
 try:
-    res=con.execute(sql,[int(min_rows)]).fetchdf()
+    res = con.execute(sql, [int(min_rows)]).fetchdf()
 except Exception as e:
-    st.error("Query failed: "+str(e)); st.stop()
+    st.error("Query failed: " + str(e))
+    st.stop()
 
-sort_key_map={"Conversion %":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
-res=res.sort_values(sort_key_map[metric_choice],ascending=False).head(top_n).reset_index(drop=True)
-sku_cols=[c for c in sku_cols_order if c in res.columns]
-rename_map={c:friendly_label.get(c,c) for c in attrs}
+# --- Display prep ---
+sort_key_map = {"Conversion %":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
+res = res.sort_values(sort_key_map[metric_choice], ascending=False).head(top_n).reset_index(drop=True)
+
+sku_cols = [c for c in sku_cols_order if c in res.columns]
+rename_map = {c: friendly_label.get(c, c) for c in attrs}
 rename_map.update({"conv_rate":"Conversion %","rpv":"Revenue / Visitor","revenue":"Revenue"})
-disp=res.copy().rename(columns=rename_map); disp.insert(0,"Rank",np.arange(1,len(disp)+1))
+
+disp = res.copy().rename(columns=rename_map)
+disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
+
 def fmt_int(v):
     if pd.isna(v): return ""
     try: return f"{int(round(float(v))):,}"
     except: return str(v)
-for c in ["Visitors","Purchases","Depth"]:
-    if c in disp.columns: disp[c]=disp[c].map(fmt_int)
-if "Conversion %" in disp.columns:
-    disp["Conversion %"]=res["conv_rate"].map(lambda x:f"{x:.2f}%" if pd.notnull(x) else "")
-if "Revenue / Visitor" in disp.columns:
-    disp["Revenue / Visitor"]=res["rpv"].map(lambda x:f"${x:,.2f}" if pd.notnull(x) else "")
-for c in rename_map.values():
-    if c in disp.columns: disp[c]=disp[c].fillna("").replace("None","")
-for sc in sku_cols:
-    disp[sc]=res[sc].map(lambda x:"" if pd.isna(x) or int(round(float(x)))==0 else fmt_int(x))
-attribute_display_cols=[rename_map[c] for c in attrs]
-table_cols=["Rank","Visitors","Purchases","Conversion %","Depth"]+attribute_display_cols+sku_cols
-st.dataframe(disp[table_cols].style.apply(lambda s:["font-weight:bold" if s.name=="Conversion %" else "" for _ in s],axis=0),use_container_width=True,hide_index=True)
-csv_out=res.copy().rename(columns=rename_map); csv_out.insert(0,"Rank",np.arange(1,len(csv_out)+1))
-csv_cols=["Rank","Visitors","Purchases","conv_rate","Depth","rpv","revenue"]+attrs+sku_cols
-csv_out=csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue",**{c:rename_map[c] for c in attrs}})
-st.download_button("Download ranked combinations (CSV)",data=csv_out.to_csv(index=False).encode("utf-8"),file_name="ranked_combinations.csv",mime="text/csv")
 
+for c in ["Visitors","Purchases","Depth"]:
+    if c in disp.columns:
+        disp[c] = disp[c].map(fmt_int)
+
+if "Conversion %" in disp.columns:
+    disp["Conversion %"] = res["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
+if "Revenue / Visitor" in disp.columns:
+    disp["Revenue / Visitor"] = res["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
+
+for c in rename_map.values():
+    if c in disp.columns:
+        disp[c] = disp[c].fillna("").replace("None","")
+
+for sc in sku_cols:
+    disp[sc] = res[sc].map(lambda x: "" if pd.isna(x) or int(round(float(x)))==0 else fmt_int(x))
+
+attribute_display_cols = [rename_map[c] for c in attrs]
+table_cols = ["Rank","Visitors","Purchases","Conversion %","Depth"] + attribute_display_cols + sku_cols
+
+st.dataframe(
+    disp[table_cols].style.apply(lambda s: ["font-weight: bold" if s.name=="Conversion %" else "" for _ in s], axis=0),
+    use_container_width=True, hide_index=True
+)
+
+# --- CSV export: select RAW columns first, THEN rename ---
+csv_base = res.copy()
+csv_base.insert(0, "Rank", np.arange(1, len(csv_base) + 1))
+raw_attr_cols = list(attrs)  # raw names present in `res`
+raw_cols = ["Rank","Visitors","Purchases","conv_rate","Depth","rpv","revenue"] + raw_attr_cols + sku_cols
+# Keep only columns that exist (defensive)
+raw_cols = [c for c in raw_cols if c in csv_base.columns]
+csv_out = csv_base[raw_cols].rename(columns={"conv_rate":"Conversion % (0-100)",
+                                             "rpv":"Revenue / Visitor",
+                                             "revenue":"Revenue",
+                                             **{c: rename_map[c] for c in attrs if c in rename_map}})
+st.download_button("Download ranked combinations (CSV)",
+                   data=csv_out.to_csv(index=False).encode("utf-8"),
+                   file_name="ranked_combinations.csv", mime="text/csv")
+
+# --- Map by State (on deduped table) ---
 if state_col and state_col in dff_one.columns:
     st.subheader("🗺️ State Map")
-    metric_for_map=sort_key_map[metric_choice]
-    map_df=dff_one.copy(); map_df[state_col]=map_df[state_col].astype(str).str.upper().str.strip()
-    agg=map_df.groupby(state_col).agg(Visitors=(email_col,"count"),Purchases=("_PURCHASE","sum"),Revenue=("_REVENUE","sum")).reset_index()
-    agg["conv_rate"]=100.0*agg["Purchases"]/agg["Visitors"].replace(0,np.nan)
-    agg["rpv"]=agg["Revenue"]/agg["Visitors"].replace(0,np.nan)
-    fig=px.choropleth(agg,locations=state_col,locationmode="USA-states",color=metric_for_map,scope="usa",
-        color_continuous_scale="YlOrBr",labels={"conv_rate":"Conversion %","rpv":"Revenue / Visitor"})
+    metric_for_map = sort_key_map[metric_choice]
+    map_df = dff_one.copy()
+    map_df[state_col] = map_df[state_col].astype(str).str.upper().str.strip()
+    agg = map_df.groupby(state_col).agg(Visitors=(email_col,"count"),
+                                        Purchases=("_PURCHASE","sum"),
+                                        Revenue=("_REVENUE","sum")).reset_index()
+    agg["conv_rate"] = 100.0 * agg["Purchases"] / agg["Visitors"].replace(0, np.nan)
+    agg["rpv"] = agg["Revenue"] / agg["Visitors"].replace(0, np.nan)
+    fig = px.choropleth(agg, locations=state_col, locationmode="USA-states",
+                        color=metric_for_map, scope="usa",
+                        color_continuous_scale="YlOrBr",
+                        labels={"conv_rate":"Conversion %","rpv":"Revenue / Visitor"})
     fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
-    st.plotly_chart(fig,use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
