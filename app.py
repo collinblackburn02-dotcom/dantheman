@@ -87,7 +87,7 @@ if uploaded:
                     mode = st.selectbox(f'{label}: mode', options=['Include', 'Do not include'], index=0, key=f'mode_{label}')
                     include_flags[col] = (mode == 'Include')
                     values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                    sel = st.multiselect(label, options=values, default=[], help='Empty = All')
+                    sel = st.multiselect(label, options=values, default=[], help='Empty optimized for speed = All')
                     if sel:
                         selections[col] = sel
                 idx += 1
@@ -145,11 +145,24 @@ HAVING COUNT(*) >= ?
     with c2:
         pass
     res = con.execute(sql, [int(min_rows)]).fetchdf()
-    sort_key = {'Conversion %':'conv_rate','Purchases':'Purchases','Visitors':'Visitors'}[metric_choice]
+    sort_key = {'Conversion %':'conv_rate',' Purchasers':'Purchases','Visitors':'Visitors'}[metric_choice]
     res = res.sort_values(sort_key, ascending=False).head(top_n)
     sku_cols = [c for c in res.columns if c.startswith('SKU:')]
     ordered = [c for c in attrs] + ['Visitors','Purchases','conv_rate','Depth'] + sku_cols
-    disp = res[ordered].rename(columns={'conv_rate':'Conversion %'})
+    disp = res[ordered]
+    # Clean up headers
+    def format_header(col):
+        # Remove 'skiptrace' (case-insensitive)
+        col = col.replace('skiptrace', '').replace('SKIPTRACE', '').replace('Skiptrace', '')
+        # Remove 'SKU:' prefix
+        col = col.replace('SKU:', '')
+        # Capitalize first letter of each word
+        words = col.strip().split()
+        formatted = ' '.join(word.capitalize() if word else '' for word in words)
+        return formatted
+    disp.columns = [format_header(col) for col in disp.columns]
+    # Rename conv_rate to Conversion % and format as percentage
+    disp = disp.rename(columns={'conv_rate': 'Conversion %'})
     disp['Conversion %'] = disp['Conversion %'].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else '')
     st.dataframe(disp, use_container_width=True, hide_index=True)
     st.download_button('Download ranked combinations (CSV)', data=disp.to_csv(index=False).encode('utf-8'), file_name='ranked_combinations_duckdb_v7_2.csv', mime='text/csv')
