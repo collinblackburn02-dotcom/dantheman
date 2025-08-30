@@ -53,7 +53,6 @@ if uploaded:
         'Homeowner': resolve_col(df, 'HOMEOWNER'),
         'Married': resolve_col(df, 'MARRIED'),
         'Children': resolve_col(df, 'CHILDREN'),
-        'State': resolve_col(df, 'STATE'),
     }
     seg_map = {k:v for k,v in seg_map.items() if v is not None}
     seg_cols = [v for v in seg_map.values()]
@@ -148,57 +147,10 @@ HAVING COUNT(*) >= ?
     res = con.execute(sql, [int(min_rows)]).fetchdf()
     sort_key = {'Conversion %':'conv_rate','Purchases':'Purchases','Visitors':'Visitors'}[metric_choice]
     res = res.sort_values(sort_key, ascending=False).head(top_n)
-    # Add Rank column
-    res['Rank'] = range(1, len(res) + 1)
     sku_cols = [c for c in res.columns if c.startswith('SKU:')]
     ordered = [c for c in attrs] + ['Visitors','Purchases','conv_rate','Depth'] + sku_cols
-    disp = res[ordered + ['Rank']]
-    # Clean up headers
-    def format_header(col):
-        if col == 'conv_rate':  # Skip formatting for conv_rate
-            return col
-        # Remove 'skiptrace' (case-insensitive)
-        col = col.replace('skiptrace', '').replace('SKIPTRACE', '').replace('Skiptrace', '')
-        # Remove 'SKU:' prefix
-        col = col.replace('SKU:', '')
-        # Capitalize first letter of each word
-        words = col.strip().split()
-        formatted = ' '.join(word.capitalize() if word else '' for word in words)
-        return formatted
-    disp.columns = [format_header(col) for col in disp.columns]
-    # Map to requested column names
-    column_name_map = {
-        'Visitors': 'Visitors',
-        'Purchases': 'Purchases',
-        'conv_rate': 'Conversion',
-        seg_map.get('Gender', ''): 'Gender' if seg_map.get('Gender') in disp.columns else None,
-        seg_map.get('Age', ''): 'Age' if seg_map.get('Age') in disp.columns else None,
-        seg_map.get('Homeowner', ''): 'Homeowner' if seg_map.get('Homeowner') in disp.columns else None,
-        seg_map.get('Married', ''): 'Married' if seg_map.get('Married') in disp.columns else None,
-        seg_map.get('Children', ''): 'Children' if seg_map.get('Children') in disp.columns else None,
-        seg_map.get('Credit', ''): 'Credit rating' if seg_map.get('Credit') in disp.columns else None,
-        seg_map.get('Income', ''): 'Income' if seg_map.get('Income') in disp.columns else None,
-        seg_map.get('Net Worth', ''): 'Net worth' if seg_map.get('Net Worth') in disp.columns else None,
-        seg_map.get('State', ''): 'State' if seg_map.get('State') in disp.columns else None,
-    }
-    # Remove None values and columns not in disp
-    column_name_map = {k: v for k, v in column_name_map.items() if v is not None and k in disp.columns}
-    disp = disp.rename(columns=column_name_map)
-    # Reorder columns
-    desired_order = [
-        'Rank', 'Visitors', 'Purchases', 'Conversion', 'Gender', 'Age', 'Homeowner',
-        'Married', 'Children', 'Credit rating', 'Income', 'Net worth', 'State'
-    ]
-    # Include only columns that exist in disp, then append SKU columns
-    final_columns = [col for col in desired_order if col in disp.columns]
-    sku_columns = [col for col in disp.columns if col not in final_columns and col not in ['Depth']]
-    final_columns += sku_columns
-    disp = disp[final_columns]
-    # Format Conversion as percentage
-    if 'Conversion' in disp.columns:
-        disp['Conversion'] = disp['Conversion'].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else '')
-    else:
-        st.warning("Conversion column not found in results.")
+    disp = res[ordered].rename(columns={'conv_rate':'Conversion %'})
+    disp['Conversion %'] = disp['Conversion %'].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else '')
     st.dataframe(disp, use_container_width=True, hide_index=True)
     st.download_button('Download ranked combinations (CSV)', data=disp.to_csv(index=False).encode('utf-8'), file_name='ranked_combinations_duckdb_v7_2.csv', mime='text/csv')
 else:
