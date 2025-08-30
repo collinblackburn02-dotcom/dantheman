@@ -1,5 +1,6 @@
 
 import pandas as pd
+
 ALIASES = {
     "EMAIL": ["EMAIL","Email","email"],
     "PURCHASE": ["PURCHASE","Purchase","purchased","Buyer","is_buyer"],
@@ -13,13 +14,15 @@ ALIASES = {
     "INCOME_RANGE": ["INCOME_RANGE","Income Range","income_range"],
     "CREDIT_RATING": ["SKIPTRACE_CREDIT_RATING","Credit Rating","credit_rating","SKIPTRACE CREDIT RATING"],
     "MOST_RECENT_SKU": ["MostRecentSKU","Most Recent SKU","Recent SKU","SKU"],
-    "PERSONAL_STATE": ["PERSONAL_STATE","State","STATE"],
+    "PERSONAL_STATE": ["PERSONAL_STATE","State","STATE","Shipping State"],
     "REVENUE": ["Total","TOTAL","Order Total","ORDER TOTAL","Sale Price","Lineitem price","LINEITEM PRICE"],
 }
+
 def resolve_col(df: pd.DataFrame, key: str) -> str | None:
     cands = ALIASES.get(key, [])
     for c in cands:
-        if c in df.columns: return c
+        if c in df.columns:
+            return c
         for dc in df.columns:
             if str(dc).strip().lower() == str(c).strip().lower():
                 return dc
