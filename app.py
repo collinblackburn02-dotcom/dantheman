@@ -215,16 +215,29 @@ revenue_sql = (
     if revenue_col else "0.0 AS revenue, 0.0 AS rpv"
 )
 
+
+# Build SELECT list safely (avoid a leading comma when no attribute columns)
+select_parts = []
+if attrs:
+    select_parts.extend([f'"{c}"' for c in attrs])
+select_parts.append(f'COUNT(DISTINCT "{email_col}") AS Visitors')
+select_parts.append(f'COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS Purchases')
+select_parts.append('100.0 * COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END)
+        / NULLIF(COUNT(DISTINCT "{email_col}"),0) AS conv_rate')
+select_parts.append(f'({depth_expr}) AS Depth')
+select_parts.append(revenue_sql.replace("\n", "
+").replace("  ", " "))
+if sku_sums:
+    # sku_sums is like ",
+  COUNT... AS \"SKU\""; we need to strip the initial comma and prepend properly
+    select_parts.append(sku_sums.lstrip(",\n ").replace("\n  ", "\n"))
+
+select_clause = ",
+  ".join(select_parts)
+
 sql = f"""
 SELECT
-  {", ".join([f'"{c}"' for c in attrs])},
-  COUNT(DISTINCT "{email_col}") AS Visitors,
-  COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS Purchases,
-  100.0 * COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END)
-        / NULLIF(COUNT(DISTINCT "{email_col}"),0) AS conv_rate,
-  ({depth_expr}) AS Depth,
-  {revenue_sql}
-  {sku_sums}
+  {select_clause}
 FROM t
 {'GROUP BY GROUPING SETS (' + grouping_sets_sql + ')' if attrs else ''}
 HAVING COUNT(DISTINCT "{email_col}") >= ?
