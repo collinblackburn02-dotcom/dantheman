@@ -14,6 +14,7 @@ ALIASES = {
     "INCOME_RANGE": ["INCOME_RANGE","Income Range","income_range"],
     "CREDIT_RATING": ["SKIPTRACE_CREDIT_RATING","Credit Rating","credit_rating","SKIPTRACE CREDIT RATING"],
     "MOST_RECENT_SKU": ["MostRecentSKU","Most Recent SKU","Recent SKU","SKU"],
+    "PERSONAL_STATE": ["PERSONAL_STATE","State","STATE","Shipping State"],
     "REVENUE": ["Total","TOTAL","Order Total","ORDER TOTAL","Sale Price","Lineitem price","LINEITEM PRICE"],
 }
 
