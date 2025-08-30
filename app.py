@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -172,7 +171,7 @@ if uploaded:
         pieces = []
         for sku in top_skus:
             s_escaped = sku.replace("'", "''")
-            pieces.append(f"SUM(CASE WHEN \"{msku_col}\"='{s_escaped}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{s_escaped}\"")
+            pieces.append('SUM(CASE WHEN "{msku_col}"=\'{s_escaped}\' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS "{s_escaped}"')
         sku_sums = ",\n  " + ",\n  ".join(pieces)
 
     depth_expr = " + ".join([f"CASE WHEN \"{c}\" IS NULL THEN 0 ELSE 1 END" for c in attrs]) if attrs else "0"
@@ -210,24 +209,42 @@ if uploaded:
     res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
     # Display order: Rank → Visitors → Purchases → Conversion % (bold) → Depth → SKU cols → attributes
-    sku_cols = [c for c in res.columns if c.startswith("SKU:")]
+    sku_cols = [c for c in top_skus if c in res.columns]
     metric_cols = ["Visitors","Purchases","conv_rate","Depth","rpv","revenue"]
     ordered = ["Visitors","Purchases","conv_rate"] + ["Depth"] + sku_cols + [c for c in attrs]
 
     disp = res.copy()
+    # Build friendly header map for attribute columns
+    friendly_by_col = {}
+    for _label, _col in seg_map.items():
+        _shown = _label
+        if _label == 'Credit':
+            _shown = 'Credit rating'
+        if _label == 'Net Worth':
+            _shown = 'Net worth'
+        friendly_by_col[_col] = _shown
+    disp = disp.rename(columns={'conv_rate':'Conversion', **friendly_by_col})
     # Rank column
-    disp.insert(0, "Rank", np.arange(1, len(disp)+1))
-    # Conversion % as human-readable
-    disp["Conversion"] = disp["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
-    # RPV as dollars if present
-    if "rpv" in disp.columns:
-        disp["Revenue / Visitor"] = disp["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
-    # Clean blanks (no 'None')
-    for col in attrs:
-        if col in disp.columns:
-            disp[col] = disp[col].fillna("").replace("None","")
-    # Build final order
-    table_cols = ["Rank","Visitors","Purchases","Conversion","Depth"] + sku_cols + [c for c in attrs]
+    disp.insert(0, 'Rank', np.arange(1, len(disp)+1))
+    # Format numbers as human-friendly
+    def _fmt_int(v):
+        import math
+        try:
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                return ''
+            return f"{int(round(float(v))):,}"
+        except Exception:
+            return v
+    if 'Visitors' in disp.columns:
+        disp['Visitors'] = disp['Visitors'].map(_fmt_int)
+    if 'Purchases' in disp.columns:
+        disp['Purchases'] = disp['Purchases'].map(_fmt_int)
+    if 'Depth' in disp.columns:
+        disp['Depth'] = disp['Depth'].map(_fmt_int)
+    # Conversion as percent string
+    if 'Conversion' in disp.columns:
+        disp['Conversion'] = res['conv_rate'].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else '')
+table_cols = ['Rank','Visitors','Purchases','Conversion','Depth'] + [c for c in ['Gender','Age','Homeowner','Married','Children','Credit rating','Income','Net worth','State'] if c in disp.columns] + sku_cols + sku_cols + [c for c in attrs]
     # Show table with bold Conversion %
     def highlight_conv(s):
         return ["font-weight: bold" if s.name=="Conversion" else "" for _ in s]
