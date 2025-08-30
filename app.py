@@ -192,9 +192,39 @@ required_cols = [col for col, vals in selections.items() if len(vals) > 0 and in
 # DuckDB compute (distinct visitors by email)
 # -------------------------
 con = duckdb.connect()
-con.register("t", dff)
+con.register("t", dff)  # registered above
 
 attrs = [c for c in include_cols if c in dff.columns]
+
+# -------------------------
+# Pre-aggregation to one row per visitor (reduces memory)
+# -------------------------
+# We create a per-email snapshot (latest by date when available) so each visitor is counted once.
+# This drastically reduces memory use with GROUPING SETS and DISTINCTs.
+con.unregister("t")
+con.register("t", dff)  # registered above
+con.execute(f"""
+    CREATE OR REPLACE TEMP VIEW v AS
+    SELECT *
+    FROM (
+        SELECT
+            t.*,
+            ROW_NUMBER() OVER (PARTITION BY "{email_col}" ORDER BY _DATE DESC NULLS LAST) AS _rn
+        FROM {src_table} AS t
+    )
+    WHERE _rn = 1
+""")
+
+# Use 'v' for all downstream aggregations
+src_table = "v"
+
+# Optional: prune ultra-high-cardinality attributes to avoid explosion
+max_levels = st.slider("Max unique values per attribute (to include)", 2, 100, 50, 1,
+                       help="Attributes with more distinct values than this threshold are excluded to keep the query fast and memory-safe.")
+attrs = [c for c in include_cols if c in dff.columns and dff[c].nunique(dropna=True) <= max_levels]
+if len(attrs) < 1:
+    st.warning("No attributes selected under the current 'Max unique values per attribute' threshold. Only overall totals will be shown.")
+
 
 req_set = set(required_cols)
 sets = []
@@ -217,14 +247,14 @@ grouping_sets_sql = ",\n".join(sets)
 sku_sums = ""
 sku_cols_order = []
 if msku_col and msku_col in dff.columns:
-    top_skus = con.execute(f"""
-        SELECT "{msku_col}" AS sku,
-               COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS buyers
-        FROM t
-        WHERE "{msku_col}" IS NOT NULL AND TRIM("{msku_col}")<>''
-        GROUP BY 1
-        ORDER BY buyers DESC
-        LIMIT 11
+    top_skus = con.execute(f"""\
+        SELECT "{msku_col}" AS sku,\
+               COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS buyers\
+        FROM {src_table}\
+        WHERE "{msku_col}" IS NOT NULL AND TRIM("{msku_col}")<>''\
+        GROUP BY 1\
+        ORDER BY buyers DESC\
+        LIMIT 11\
     """).fetchdf()["sku"].astype(str).tolist()
     if top_skus:
         sku_cols_order = top_skus
@@ -264,7 +294,7 @@ select_clause = ",\n  ".join(select_parts)
 sql = f"""
 SELECT
   {select_clause}
-FROM t
+FROM {src_table}
 {'GROUP BY GROUPING SETS (' + grouping_sets_sql + ')' if attrs else ''}
 HAVING COUNT(DISTINCT "{email_col}") >= ?
 """
@@ -274,7 +304,11 @@ HAVING COUNT(DISTINCT "{email_col}") >= ?
 # -------------------------
 st.subheader("🏆 Ranked Conversion Table")
 min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
-res = con.execute(sql, [int(min_rows)]).fetchdf()
+try:
+        res = con.execute(sql.format(src_table=src_table), [int(min_rows)]).fetchdf()
+    except Exception as e:
+        st.error('Query ran out of memory or failed. Try lowering Max combo depth, Top N, or Max unique values per attribute.\n\n' + str(e))
+        st.stop()
 
 sort_key_map = {"Conversion %": "conv_rate", "Purchases": "Purchases", "Visitors": "Visitors", "Revenue / Visitor": "rpv"}
 sort_key = sort_key_map[metric_choice]
