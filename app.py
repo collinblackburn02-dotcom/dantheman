@@ -7,9 +7,11 @@ st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="w
 
 # Header
 c1,c2=st.columns([0.12,0.88])
-with c1: 
-    try: st.image("logo.png",use_column_width=True)
-    except: pass
+with c1:
+    try:
+        st.image("logo.png")
+    except Exception:
+        pass
 with c2:
     st.markdown("<h1 style='margin-bottom:0'>Heavenly Health — Customer Insights</h1>", unsafe_allow_html=True)
     st.caption("Fast, ranked customer segments powered by DuckDB (GROUPING SETS).")
@@ -112,11 +114,17 @@ if up:
     fixed_skus = ["ECO","FIR1","FIR2","RL2","TRA2","COM2","OUT2","RL500MID-W","RL900PRO-B","RL900PRO-W"]
     sku_sums = ""
     if sku_col and sku_col in dff.columns:
-        parts=[f"SUM(CASE WHEN \"{sku_col}\"='{sku.replace(\"'\",\"''\")}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{sku}\"" for sku in fixed_skus]
+        parts = []
+        for sku in fixed_skus:
+            safe_sku = str(sku).replace("'", "''")  # escape quotes once, safely
+            parts.append(f"SUM(CASE WHEN \"{sku_col}\"='{safe_sku}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{sku}\"")
         sku_sums = ",\n      " + ",\n      ".join(parts)
 
     depth_expr = " + ".join([f'CASE WHEN \"{c}\" IS NULL THEN 0 ELSE 1 END' for c in attrs]) if attrs else "0"
-    revenue_sql = "SUM(_REVENUE) AS revenue,\n      1.0 * SUM(_REVENUE) / NULLIF(COUNT(*),0) AS rpv" if \"_REVENUE\" in dff.columns else "0.0 AS revenue,\n      0.0 AS rpv"
+    if revenue_col:
+        revenue_sql = "SUM(_REVENUE) AS revenue,\n      1.0 * SUM(_REVENUE) / NULLIF(COUNT(*),0) AS rpv"
+    else:
+        revenue_sql = "0.0 AS revenue,\n      0.0 AS rpv"
     attrs_sql = ", ".join([f'\"{c}\"' for c in attrs]) if attrs else "'All' AS overall"
 
     sql = f"""
@@ -138,28 +146,28 @@ if up:
     min_rows = st.number_input("Minimum Visitors per group",1,100000,30,1)
     res = con.execute(sql,[int(min_rows)]).fetchdf()
 
-    sort_key_map={\"Conversion %\":\"conv_rate\",\"Purchases\":\"Purchases\",\"Visitors\":\"Visitors\",\"Revenue / Visitor\":\"rpv\"}
+    sort_key_map={"Conversion %":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
     key = sort_key_map[metric_choice]
     res = res.sort_values(key, ascending=False).head(top_n).reset_index(drop=True)
-    res.insert(0,\"Rank\",np.arange(1,len(res)+1))
-    res[\"Conversion %\"]=res[\"conv_rate\"].map(lambda x: f\"{x:.2f}%\" if pd.notnull(x) else \"\")
+    res.insert(0,"Rank",np.arange(1,len(res)+1))
+    res["Conversion %"]=res["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 
     # clean blanks
     for c in attrs:
         if c in res.columns:
-            res[c]=res[c].fillna(\"\").replace(\"None\",\"\")
+            res[c]=res[c].fillna("").replace("None","")
 
-    sku_cols=[c for c in [f\"SKU:{s}\" for s in fixed_skus] if c in res.columns]
-    cols=[\"Rank\",\"Visitors\",\"Purchases\",\"Conversion %\",\"Depth\"] + sku_cols + [c for c in attrs]
+    sku_cols=[c for c in [f"SKU:{s}" for s in fixed_skus] if c in res.columns]
+    cols=["Rank","Visitors","Purchases","Conversion %","Depth"] + sku_cols + [c for c in attrs]
     st.dataframe(res[cols], use_container_width=True, hide_index=True)
 
     # Map
     if state_col and state_col in dff.columns:
-        st.subheader(\"🗺️ State Map\")
-        agg = dff.groupby(state_col).agg(Visitors=(email_col,\"count\"), Purchases=(\"_PURCHASE\",\"sum\"), Revenue=(\"_REVENUE\",\"sum\")).reset_index()
-        agg[\"conv_rate\"]=100.0*agg[\"Purchases\"]/agg[\"Visitors\"].replace(0,np.nan)
-        agg[\"rpv\"]=agg[\"Revenue\"]/agg[\"Visitors\"].replace(0,np.nan)
-        color = {\"Conversion %\":\"conv_rate\",\"Purchases\":\"Purchases\",\"Visitors\":\"Visitors\",\"Revenue / Visitor\":\"rpv\"}[metric_choice]
-        fig = px.choropleth(agg, locations=state_col, locationmode=\"USA-states\", color=color, scope=\"usa\", color_continuous_scale=\"YlOrBr\")
-        fig.update_layout(margin={\"l\":0,\"r\":0,\"t\":0,\"b\":0})
+        st.subheader("🗺️ State Map")
+        agg = dff.groupby(state_col).agg(Visitors=(email_col,"count"), Purchases=("_PURCHASE","sum"), Revenue=("_REVENUE","sum")).reset_index()
+        agg["conv_rate"]=100.0*agg["Purchases"]/agg["Visitors"].replace(0,np.nan)
+        agg["rpv"]=agg["Revenue"]/agg["Visitors"].replace(0,np.nan)
+        color = {"Conversion %":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}[metric_choice]
+        fig = px.choropleth(agg, locations=state_col, locationmode="USA-states", color=color, scope="usa", color_continuous_scale="YlOrBr")
+        fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
         st.plotly_chart(fig, use_container_width=True)
