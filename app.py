@@ -172,7 +172,7 @@ if uploaded:
         pieces = []
         for sku in top_skus:
             s_escaped = sku.replace("'", "''")
-            pieces.append(f"SUM(CASE WHEN "{msku_col}"='{s_escaped}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS "SKU:{s_escaped}"")
+            pieces.append(f"SUM(CASE WHEN \"{msku_col}\"='{s_escaped}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{s_escaped}\"")
         sku_sums = ",\n  " + ",\n  ".join(pieces)
 
     depth_expr = " + ".join([f"CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END" for c in attrs]) if attrs else "0"
