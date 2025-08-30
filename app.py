@@ -234,99 +234,34 @@ if uploaded:
 
     styled = disp[table_cols].style.apply(highlight_conv, axis=0)
     st.dataframe(styled, use_container_width=True, hide_index=True)
-
-    # Download CSV (un-styled, numeric conv_rate + rpv kept)
-    csv_out = res.copy()
-    csv_out.insert(0, "Rank", np.arange(1, len(csv_out)+1))
-    csv_cols = ["Rank","Visitors","Purchases","conv_rate","Depth","rpv","revenue"] + sku_cols + [c for c in attrs]
-    csv_out = csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue"})
-    st.download_button("Download ranked combinations (CSV)", data=csv_out.to_csv(index=False).encode("utf-8"),
-                       file_name="ranked_combinations_duckdb_v7_3.csv", mime="text/csv")
-
-    # -------- Map by State (choropleth) --------
-    if state_col and state_col in dff.columns:
-        st.subheader("🗺️ State Map")
-        metric_for_map = sort_key_map[metric_choice]
-        # Aggregate by state
-        map_df = dff.copy()
-        # normalize state codes (2-letter)
-        map_df[state_col] = map_df[state_col].astype(str).str.upper().str.strip()
-        agg = map_df.groupby(state_col).agg(Visitors=(""+email_col, "count"),
-                                            Purchases=("_PURCHASE","sum"),
-                                            Revenue=("_REVENUE","sum")).reset_index()
-        agg["conv_rate"] = 100.0 * agg["Purchases"] / agg["Visitors"].replace(0, np.nan)
-        agg["rpv"] = agg["Revenue"] / agg["Visitors"].replace(0, np.nan)
-        color_col = metric_for_map
-        # Plotly expects 'locationmode="USA-states"' and state abbreviations
-        fig = px.choropleth(agg, locations=state_col, locationmode="USA-states",
-                            color=color_col, scope="usa",
-                            color_continuous_scale="YlOrBr",
-                            labels={"conv_rate":"Conversion","rpv":"Revenue / Visitor"})
-        fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
-        st.plotly_chart(fig, use_container_width=True)
-
-else:
-    st.info("Upload the merged CSV to begin.")
-
- for c in attrs]
-    csv_out = csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue"})
-    st.download_button("Download ranked combinations (CSV)", data=csv_out.to_csv(index=False).encode("utf-8"),
-                       file_name="ranked_combinations_duckdb_v7_3_2.csv", mime="text/csv")
-
-    # -------- Map by State --------
-    if state_col and state_col in dff.columns:
-        st.subheader("🗺️ State Map")
-        metric_for_map = sort_key_map[metric_choice]
-        # Aggregate by state
-        map_df = dff.copy()
-        map_df[state_col] = map_df[state_col].astype(str).str.upper().str.strip()
-        agg = map_df.groupby(state_col).agg(
-            Visitors=(email_col, "count"),
-            Purchases=("_PURCHASE","sum"),
-            Revenue=("_REVENUE","sum")
-        ).reset_index()
-        agg["conv_rate"] = 100.0 * agg["Purchases"] / agg["Visitors"].replace(0, np.nan)
-        agg["rpv"] = agg["Revenue"] / agg["Visitors"].replace(0, np.nan)
-        color_col = metric_for_map
-        fig = px.choropleth(agg, locations=state_col, locationmode="USA-states",
-                            color=color_col, scope="usa",
-                            color_continuous_scale="YlOrBr",
-                            labels={"conv_rate":"Conversion","rpv":"Revenue / Visitor"})
-        fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
-        st.plotly_chart(fig, use_container_width=True)
-
-else:
-    st.info("Upload the merged CSV to begin.")
-
-    attrs]
-    csv_out = csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue"})
-    st.download_button("Download ranked combinations (CSV)", data=csv_out.to_csv(index=False).encode("utf-8"),
-                       file_name="ranked_combinations_duckdb_v7_3_2.csv", mime="text/csv")
+    # Download CSV: mirror on-screen columns & headers
+    csv_out = disp[table_cols]
+    st.download_button(
+        'Download ranked combinations (CSV)',
+        data=csv_out.to_csv(index=False).encode('utf-8'),
+        file_name='ranked_combinations.csv',
+        mime='text/csv'
+    )
 
     # -------- Map by State (choropleth) --------
     if state_col and state_col in dff.columns:
-        st.subheader("🗺️ State Map")
-        sort_key_map = {"Conversion":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
+        st.subheader('🗺️ State Map')
         metric_for_map = sort_key_map[metric_choice]
         map_df = dff.copy()
-        # Normalize state abbreviations
         map_df[state_col] = map_df[state_col].astype(str).str.upper().str.strip()
         agg = map_df.groupby(state_col).agg(
-            Visitors=(email_col, "count"),
-            Purchases=("_PURCHASE","sum"),
-            Revenue=("_REVENUE","sum")
+            Visitors=(email_col, 'count'),
+            Purchases=('_PURCHASE','sum')
         ).reset_index()
-        agg["conv_rate"] = 100.0 * agg["Purchases"] / agg["Visitors"].replace(0, np.nan)
-        agg["rpv"] = agg["Revenue"] / agg["Visitors"].replace(0, np.nan)
-        color_col = metric_for_map
+        agg['conv_rate'] = 100.0 * agg['Purchases'] / agg['Visitors'].replace(0, np.nan)
         import plotly.express as px
         fig = px.choropleth(
-            agg, locations=state_col, locationmode="USA-states", color=color_col, scope="usa",
-            color_continuous_scale="YlOrBr",
-            labels={"conv_rate":"Conversion","rpv":"Revenue / Visitor"}
+            agg, locations=state_col, locationmode='USA-states', color=metric_for_map, scope='usa',
+            color_continuous_scale='YlOrBr',
+            labels={'conv_rate':'Conversion'}
         )
-        fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
+        fig.update_layout(margin={'l':0,'r':0,'t':0,'b':0})
         st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("Upload the merged CSV to begin.")
+    st.info('Upload the merged CSV to begin.')
