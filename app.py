@@ -175,7 +175,7 @@ if uploaded:
             pieces.append(f"SUM(CASE WHEN \"{msku_col}\"='{s_escaped}' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS \"SKU:{s_escaped}\"")
         sku_sums = ",\n  " + ",\n  ".join(pieces)
 
-    depth_expr = " + ".join([f"CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END" for c in attrs]) if attrs else "0"
+    depth_expr = " + ".join([f"CASE WHEN \"{c}\" IS NULL THEN 0 ELSE 1 END" for c in attrs]) if attrs else "0"
 
     # Revenue/RPV aggregates
     revenue_sql = "SUM(_REVENUE) AS revenue,\n  1.0 * SUM(_REVENUE) / NULLIF(COUNT(*),0) AS rpv" if revenue_col else "0.0 AS revenue, 0.0 AS rpv"
@@ -262,6 +262,69 @@ if uploaded:
                             color=color_col, scope="usa",
                             color_continuous_scale="YlOrBr",
                             labels={"conv_rate":"Conversion %","rpv":"Revenue / Visitor"})
+        fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
+        st.plotly_chart(fig, use_container_width=True)
+
+else:
+    st.info("Upload the merged CSV to begin.")
+
+ for c in attrs]
+    csv_out = csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue"})
+    st.download_button("Download ranked combinations (CSV)", data=csv_out.to_csv(index=False).encode("utf-8"),
+                       file_name="ranked_combinations_duckdb_v7_3_2.csv", mime="text/csv")
+
+    # -------- Map by State --------
+    if state_col and state_col in dff.columns:
+        st.subheader("🗺️ State Map")
+        metric_for_map = sort_key_map[metric_choice]
+        # Aggregate by state
+        map_df = dff.copy()
+        map_df[state_col] = map_df[state_col].astype(str).str.upper().str.strip()
+        agg = map_df.groupby(state_col).agg(
+            Visitors=(email_col, "count"),
+            Purchases=("_PURCHASE","sum"),
+            Revenue=("_REVENUE","sum")
+        ).reset_index()
+        agg["conv_rate"] = 100.0 * agg["Purchases"] / agg["Visitors"].replace(0, np.nan)
+        agg["rpv"] = agg["Revenue"] / agg["Visitors"].replace(0, np.nan)
+        color_col = metric_for_map
+        fig = px.choropleth(agg, locations=state_col, locationmode="USA-states",
+                            color=color_col, scope="usa",
+                            color_continuous_scale="YlOrBr",
+                            labels={"conv_rate":"Conversion %","rpv":"Revenue / Visitor"})
+        fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
+        st.plotly_chart(fig, use_container_width=True)
+
+else:
+    st.info("Upload the merged CSV to begin.")
+
+    attrs]
+    csv_out = csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue"})
+    st.download_button("Download ranked combinations (CSV)", data=csv_out.to_csv(index=False).encode("utf-8"),
+                       file_name="ranked_combinations_duckdb_v7_3_2.csv", mime="text/csv")
+
+    # -------- Map by State (choropleth) --------
+    if state_col and state_col in dff.columns:
+        st.subheader("🗺️ State Map")
+        sort_key_map = {"Conversion %":"conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
+        metric_for_map = sort_key_map[metric_choice]
+        map_df = dff.copy()
+        # Normalize state abbreviations
+        map_df[state_col] = map_df[state_col].astype(str).str.upper().str.strip()
+        agg = map_df.groupby(state_col).agg(
+            Visitors=(email_col, "count"),
+            Purchases=("_PURCHASE","sum"),
+            Revenue=("_REVENUE","sum")
+        ).reset_index()
+        agg["conv_rate"] = 100.0 * agg["Purchases"] / agg["Visitors"].replace(0, np.nan)
+        agg["rpv"] = agg["Revenue"] / agg["Visitors"].replace(0, np.nan)
+        color_col = metric_for_map
+        import plotly.express as px
+        fig = px.choropleth(
+            agg, locations=state_col, locationmode="USA-states", color=color_col, scope="usa",
+            color_continuous_scale="YlOrBr",
+            labels={"conv_rate":"Conversion %","rpv":"Revenue / Visitor"}
+        )
         fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
         st.plotly_chart(fig, use_container_width=True)
 
