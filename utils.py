@@ -1,8 +1,4 @@
-
-import re
 import pandas as pd
-import numpy as np
-
 ALIASES = {
     "EMAIL": ["EMAIL","Email","email"],
     "PURCHASE": ["PURCHASE","Purchase","purchased","Buyer","is_buyer"],
@@ -15,10 +11,8 @@ ALIASES = {
     "NET_WORTH": ["NET_WORTH","Net Worth","NetWorth"],
     "INCOME_RANGE": ["INCOME_RANGE","Income Range","income_range"],
     "CREDIT_RATING": ["SKIPTRACE_CREDIT_RATING","Credit Rating","credit_rating","SKIPTRACE CREDIT RATING"],
-    "SKUS": ["SKUs","Sku List","SKU List","Lineitem sku","SKU"],
     "MOST_RECENT_SKU": ["MostRecentSKU","Most Recent SKU","Recent SKU"],
 }
-
 def resolve_col(df: pd.DataFrame, key: str) -> str | None:
     cands = ALIASES.get(key, [])
     for c in cands:
@@ -28,46 +22,3 @@ def resolve_col(df: pd.DataFrame, key: str) -> str | None:
             if str(dc).strip().lower() == str(c).strip().lower():
                 return dc
     return None
-
-def coerce_purchase(df: pd.DataFrame, col: str) -> pd.Series:
-    s = df[col]
-    if pd.api.types.is_numeric_dtype(s):
-        return (s.fillna(0) > 0).astype(int)
-    vals = s.astype(str).str.strip().str.lower()
-    yes = {"1","true","t","yes","y","buyer","purchased"}
-    return vals.isin(yes).astype(int)
-
-def to_datetime_series(s: pd.Series) -> pd.Series:
-    try:
-        return pd.to_datetime(s, errors="coerce")
-    except Exception:
-        return pd.to_datetime(pd.Series([None]*len(s)))
-
-def explode_skus(df: pd.DataFrame, skus_col: str, sep_candidates=None):
-    if sep_candidates is None:
-        sep_candidates = [";", ",", "|", "/"]
-    d = df[df["_PURCHASE"] == 1].copy()
-    d[skus_col] = d[skus_col].astype(str).fillna("")
-    for sep in sep_candidates:
-        d[skus_col] = d[skus_col].str.replace(sep, " ", regex=False)
-    d["__sku_list"] = d[skus_col].str.split()
-    d = d.explode("__sku_list")
-    d = d.rename(columns={"__sku_list": "__SKU"})
-    d = d[d["__SKU"].notna() & (d["__SKU"] != "")]
-    return d
-
-def clean_sku_token(tok: str) -> str | None:
-    if tok is None:
-        return None
-    s = str(tok).strip()
-    if not s:
-        return None
-    if " " in s:
-        return None
-    if re.fullmatch(r"[A-Za-z0-9_-]{2,40}", s) is None:
-        return None
-    has_digit = any(ch.isdigit() for ch in s)
-    is_all_caps = s.isupper() and s.isalpha() and 2 <= len(s) <= 12
-    if not (has_digit or is_all_caps):
-        return None
-    return s
