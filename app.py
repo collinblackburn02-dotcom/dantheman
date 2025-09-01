@@ -118,11 +118,8 @@ st.markdown('<div class="heavenly-section-title">Combined Conversion Ranking Tab
 with st.sidebar:
     st.markdown("### Controls")
     CSV_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dantheman/main/Copy%20of%20DAN_HHS%20-%20Sample.csv"
-
-# Real header starts at row 4
-raw = pd.read_csv(CSV_URL, skiprows=3)
-raw.columns = [str(c).strip() for c in raw.columns]
-
+    raw = pd.read_csv(CSV_URL, skiprows=3)
+    raw.columns = [str(c).strip() for c in raw.columns]
     st.markdown("---")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
     # Minimum visitors: floor 100, default 100
