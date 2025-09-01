@@ -25,7 +25,7 @@ st.title("Expanded Ranked Customer Dashboard")
 min_visitors = st.number_input(
     "Minimum number of visitors to show a group",
     min_value=0,
-    value=400,
+    value=10,  # Changed to 10 for testing (since dataset has max 197 rows)
     step=1
 )
 
@@ -100,11 +100,11 @@ else:
     # GROUP BY clause
     group_by_clause = ", ".join(selected_attributes)
     
-    # Additional WHERE clause to suppress rollup NULLs for filtered attributes
+    # Filter to exclude rollup NULLs for attributes with specific values
     rollup_filter = []
     for col, vals in specific_values.items():
-        if vals:  # If specific values selected, exclude NULLs for this column
-            rollup_filter.append(f"{col} IS NOT NULL")
+        if vals:  # If specific values selected, ensure non-NULL in output
+            rollup_filter.append(f"{col} IN ({', '.join([f"'{v}'" for v in vals])})")
     
     rollup_filter_clause = " AND ".join(rollup_filter)
     if rollup_filter_clause:
@@ -137,7 +137,7 @@ else:
     try:
         result = con.execute(query).fetchdf()
         if result.empty:
-            st.warning("No groups meet the minimum visitor threshold.")
+            st.warning(f"No groups meet the minimum visitor threshold of {min_visitors}.")
         else:
             st.dataframe(result, use_container_width=True)
     except Exception as e:
