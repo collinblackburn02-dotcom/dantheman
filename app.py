@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 
 st.set_page_config(page_title="Ranked Customer Dashboard — Precomputed CSV", layout="wide")
-st.title("📊 Ranked Customer Dashboard (Precomputed CSV)")
-st.caption("Loads your Sheets export (skip first 3 rows), then filters, ranks, and displays. No recomputation.")
+st.title("📊 Ranked Customer Dashboard")
+st.caption("Auto-loads your CSV from the repo. No upload needed. Skips first 3 rows, then filters/ranks/displays.")
 
 # ---------------- Sidebar ----------------
 with st.sidebar:
