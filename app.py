@@ -12,7 +12,6 @@ with st.sidebar:
     st.markdown("### Controls")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
     top_n = st.slider("Top N", 10, 2000, 50, 10)
-    # Minimum visitors: floor 100, default 100
     min_rows = st.number_input("Minimum Visitors per group", min_value=100, value=100, step=1)
 
     st.markdown("---")
@@ -226,14 +225,10 @@ disp = dff[table_cols].rename(columns=rename_map)
 
 # ================= Show & Download =================
 st.dataframe(disp, use_container_width=True, hide_index=True)
+
 st.download_button(
     "Download ranked combinations (CSV)",
     data=disp.to_csv(index=False).encode("utf-8"),
-    file_name="ranked_combinations_precomputed.csv",
-    mime="text/csv"
-)
-
-data=disp.to_csv(index=False).encode("utf-8"),
     file_name="ranked_combinations_precomputed.csv",
     mime="text/csv"
 )
