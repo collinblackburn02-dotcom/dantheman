@@ -307,9 +307,16 @@ attr_order_labels = [
     "Credit rating", "Income", "Net worth", "State",
     "Ethnicity (skiptrace)", "Department", "Seniority level", "Skiptrace credit"
 ]
-excluded_labels = {lbl for lbl, flag in exclude_flags.items() if flag} if "exclude_flags" in locals() else set()
-visible_attr_labels = [lbl for lbl in attr_order_labels if lbl in attr_map and lbl not in excluded_labels]
+
+# Only include columns where the checkbox was ticked
+if "include_flags" in locals():
+    visible_attr_labels = [lbl for lbl in attr_order_labels if lbl in attr_map and include_flags.get(lbl, True)]
+else:
+    # Fallback: include all if include_flags not set
+    visible_attr_labels = [lbl for lbl in attr_order_labels if lbl in attr_map]
+
 ordered_attr_cols = [attr_map[lbl] for lbl in visible_attr_labels]
+
 
 table_cols = ["Rank"]
 if col_visitors:   table_cols.append("Visitors_fmt")
