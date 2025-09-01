@@ -22,7 +22,12 @@ con.register('customers', df)
 st.title("Expanded Ranked Customer Dashboard")
 
 # Minimum visitors input
-min_visitors = st.number_input("Minimum number of visitors to show a group", min_value=0, value=400, step=1)
+min_visitors = st.number_input(
+    "Minimum number of visitors to show a group",
+    min_value=0,
+    value=400,
+    step=1
+)
 
 # Available attributes
 available_attributes = ['Age_Range', 'Gender', 'Home_Owner', 'Net_Worth', 'Income_Range', 'State', 'Credit_Rating']
@@ -38,35 +43,41 @@ column_mapping = {
     'Credit_Rating': 'Credit Rating'
 }
 
-# Select overall attributes
-selected_attributes = st.multiselect(
-    "Select attributes to group by",
-    options=available_attributes,
-    default=['Age_Range', 'Gender', 'Home_Owner']
-)
-
-# For each selected attribute, select specific values (multiple allowed)
+# Select attributes with toggles, 3 per row
+st.write("Select attributes to include:")
+selected_attributes = []
 specific_values = {}
-for col in selected_attributes:
-    # Get unique non-null values for the column
-    unique_query = f"""
-    SELECT DISTINCT "{column_mapping[col]}" AS val
-    FROM customers
-    WHERE "{column_mapping[col]}" IS NOT NULL AND "{column_mapping[col]}" != ''
-    ORDER BY val
-    """
-    unique_df = con.execute(unique_query).fetchdf()
-    unique_list = unique_df['val'].tolist()
-    
-    specific_values[col] = st.multiselect(
-        f"Select specific values for {col} (leave empty for all)",
-        options=unique_list,
-        default=[]  # Default empty means all
-    )
+
+# Layout in columns, 3 per row
+num_cols = 3
+rows = [available_attributes[i:i+num_cols] for i in range(0, len(available_attributes), num_cols)]
+
+for row in rows:
+    cols = st.columns(num_cols)
+    for idx, attr in enumerate(row):
+        with cols[idx]:
+            include = st.checkbox(f"Include {attr}", value=attr in ['Age_Range', 'Gender', 'Home_Owner'])  # Default includes
+            if include:
+                selected_attributes.append(attr)
+                # Get unique values
+                unique_query = f"""
+                SELECT DISTINCT "{column_mapping[attr]}" AS val
+                FROM customers
+                WHERE "{column_mapping[attr]}" IS NOT NULL AND "{column_mapping[attr]}" != ''
+                ORDER BY val
+                """
+                unique_df = con.execute(unique_query).fetchdf()
+                unique_list = unique_df['val'].tolist()
+                specific_values[attr] = st.multiselect(
+                    f"Values for {attr} (all if empty)",
+                    options=unique_list,
+                    default=[],
+                    key=f"multiselect_{attr}"
+                )
 
 # Build dynamic query
 if not selected_attributes:
-    st.warning("Please select at least one attribute to display the table.")
+    st.warning("Please include at least one attribute to display the table.")
 else:
     # Construct cleaned SELECT
     cleaned_select = ", ".join([
@@ -77,9 +88,9 @@ else:
     # Construct WHERE clause for specific values
     where_clauses = []
     for col, vals in specific_values.items():
-        if vals:  # If specific values selected, filter
+        if vals:  # Only add filter if specific values selected
             vals_str = ", ".join([f"'{v}'" for v in vals])
-            where_clauses.append(f"{col} IN ({vals_str})")
+            where_clauses.append(f'"{column_mapping[col]}" IN ({vals_str})')
     
     where_clause = " AND ".join(where_clauses)
     if where_clause:
@@ -115,6 +126,13 @@ else:
     
     # Execute and display
     try:
+        result = con.execute(query).fetchdf()
+        if result.empty:
+            st.warning("No groups meet the minimum visitor threshold.")
+        else:
+            st.dataframe(result, use_container_width=True)
+    except Exception as e:
+        st.error(f"Query error: {e}")
         result = con.execute(query).fetchdf()
         st.dataframe(result, use_container_width=True)
     except Exception as e:
