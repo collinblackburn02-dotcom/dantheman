@@ -10,7 +10,7 @@ st.caption("Auto-loads your CSV from the repo. No upload needed. Skips first 3 r
 # ================= Sidebar =================
 with st.sidebar:
     st.markdown("### Controls")
-    metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
+    metric_choice = st.radio("Sort metric", ["Conversion %", "Purchasers", "Visitors"], index=0)
     top_n = st.slider("Top N", 10, 2000, 50, 10)
     # Minimum visitors: floor 100, default 100
     min_rows = st.number_input("Minimum Visitors per group", min_value=100, value=100, step=1)
