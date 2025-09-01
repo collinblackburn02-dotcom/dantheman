@@ -48,7 +48,6 @@ st.write("Select attributes to include:")
 selected_attributes = []
 specific_values = {}
 
-# Layout in columns, 3 per row
 num_cols = 3
 rows = [available_attributes[i:i+num_cols] for i in range(0, len(available_attributes), num_cols)]
 
@@ -56,10 +55,9 @@ for row in rows:
     cols = st.columns(num_cols)
     for idx, attr in enumerate(row):
         with cols[idx]:
-            include = st.checkbox(f"Include {attr}", value=attr in ['Age_Range', 'Gender', 'Home_Owner'])  # Default includes
+            include = st.checkbox(f"Include {attr}", value=attr in ['Age_Range', 'Gender', 'Home_Owner'], key=f"checkbox_{attr}")
             if include:
                 selected_attributes.append(attr)
-                # Get unique values
                 unique_query = f"""
                 SELECT DISTINCT "{column_mapping[attr]}" AS val
                 FROM customers
@@ -85,10 +83,10 @@ else:
         for col in selected_attributes
     ])
     
-    # Construct WHERE clause for specific values
+    # Construct WHERE clause for specific values (initial filter)
     where_clauses = []
     for col, vals in specific_values.items():
-        if vals:  # Only add filter if specific values selected
+        if vals:
             vals_str = ", ".join([f"'{v}'" for v in vals])
             where_clauses.append(f'"{column_mapping[col]}" IN ({vals_str})')
     
@@ -101,6 +99,16 @@ else:
     
     # GROUP BY clause
     group_by_clause = ", ".join(selected_attributes)
+    
+    # Additional WHERE clause to suppress rollup NULLs for filtered attributes
+    rollup_filter = []
+    for col, vals in specific_values.items():
+        if vals:  # If specific values selected, exclude NULLs for this column
+            rollup_filter.append(f"{col} IS NOT NULL")
+    
+    rollup_filter_clause = " AND ".join(rollup_filter)
+    if rollup_filter_clause:
+        rollup_filter_clause = f"WHERE {rollup_filter_clause}"
     
     query = f"""
     WITH cleaned AS (
@@ -119,6 +127,7 @@ else:
         ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate,
         RANK() OVER (ORDER BY total_revenue DESC NULLS LAST) AS rank
     FROM cleaned
+    {rollup_filter_clause}
     GROUP BY CUBE ({group_by_clause})
     HAVING COUNT(*) >= {min_visitors}
     ORDER BY total_revenue DESC NULLS LAST
@@ -131,9 +140,5 @@ else:
             st.warning("No groups meet the minimum visitor threshold.")
         else:
             st.dataframe(result, use_container_width=True)
-    except Exception as e:
-        st.error(f"Query error: {e}")
-        result = con.execute(query).fetchdf()
-        st.dataframe(result, use_container_width=True)
     except Exception as e:
         st.error(f"Query error: {e}")
