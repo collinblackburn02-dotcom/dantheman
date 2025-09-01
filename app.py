@@ -193,3 +193,58 @@ else:
 if col_visitors:
     dff["Visitors_fmt"] = fmt_int_series(pd.to_numeric(dff[col_visitors], errors="coerce"))
 if col_purchases:
+    dff["Purchasers_fmt"] = fmt_int_series(pd.to_numeric(dff[col_purchases], errors="coerce"))
+if col_depth and col_depth in dff.columns:
+    dff["Depth_fmt"] = fmt_int_series(pd.to_numeric(dff[col_depth], errors="coerce"))
+
+if col_conversion:
+    if looks_like_percent_strings(dff[col_conversion]):
+        dff["Conversion_fmt"] = dff[col_conversion].astype(str)
+    else:
+        dff["Conversion_fmt"] = pd.to_numeric(dff[col_conversion], errors="coerce").map(
+            lambda x: "" if pd.isna(x) else f"{x:.2f}%"
+        )
+else:
+    dff["Conversion_fmt"] = ""
+
+for sc in sku_cols:
+    dff[sc] = fmt_int_series(pd.to_numeric(dff[sc], errors="coerce"))
+
+# ================= Column order =================
+attr_order_labels = [
+    "Gender", "Age", "Homeowner", "Married", "Children",
+    "Credit rating", "Income", "Net worth", "State",
+    "Ethnicity (skiptrace)", "Department", "Seniority level", "Skiptrace credit"
+]
+
+excluded_labels = {lbl for lbl, flag in exclude_flags.items() if flag} if "exclude_flags" in locals() else set()
+visible_attr_labels = [lbl for lbl in attr_order_labels if lbl in attr_map and lbl not in excluded_labels]
+ordered_attr_cols = [attr_map[lbl] for lbl in visible_attr_labels]
+
+table_cols = ["Rank"]
+if col_visitors:   table_cols.append("Visitors_fmt")
+if col_purchases:  table_cols.append("Purchasers_fmt")
+table_cols.append("Conversion_fmt")
+table_cols += ordered_attr_cols
+table_cols += sku_cols
+if col_depth and "Depth_fmt" in dff.columns:
+    table_cols.append("Depth_fmt")
+
+rename_map = {
+    "Visitors_fmt": "Visitors",
+    "Purchasers_fmt": "Purchasers",
+    "Conversion_fmt": "Conversion",
+}
+if "Depth_fmt" in table_cols:
+    rename_map["Depth_fmt"] = "Depth"
+
+disp = dff[table_cols].rename(columns=rename_map)
+
+# ================= Show & Download =================
+st.dataframe(disp, use_container_width=True, hide_index=True)
+st.download_button(
+    "Download ranked combinations (CSV)",
+    data=disp.to_csv(index=False).encode("utf-8"),
+    file_name="ranked_combinations_precomputed.csv",
+    mime="text/csv"
+)
