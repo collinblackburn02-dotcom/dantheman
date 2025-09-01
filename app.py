@@ -27,17 +27,16 @@ def to_datetime_series(s: pd.Series) -> pd.Series:
     try:
         return pd.to_datetime(s, errors='coerce')
     except Exception:
-        # same length/shape fallback
         return pd.to_datetime(pd.Series([None]*len(s)))
 
 if uploaded:
     # --------------- Load & resolve columns ---------------
     df = load_df(uploaded)
-    email_col   = resolve_col(df, 'EMAIL')
-    purchase_col= resolve_col(df, 'PURCHASE')
-    date_col    = resolve_col(df, 'DATE')
-    msku_col    = resolve_col(df, 'MOST_RECENT_SKU')
-    state_col   = resolve_col(df, 'PERSONAL_STATE')  # State attribute
+    email_col    = resolve_col(df, 'EMAIL')
+    purchase_col = resolve_col(df, 'PURCHASE')
+    date_col     = resolve_col(df, 'DATE')
+    msku_col     = resolve_col(df, 'MOST_RECENT_SKU')
+    state_col    = resolve_col(df, 'PERSONAL_STATE')  # <- State attribute
     if email_col is None or purchase_col is None:
         st.error('Missing EMAIL or PURCHASE column.')
         st.stop()
@@ -51,10 +50,10 @@ if uploaded:
         yes = {'1','true','t','yes','y','buyer','purchased'}
         df['_PURCHASE'] = vals.isin(yes).astype(int)
 
-    # Date for filtering (optional)
+    # Optional date parsing for filters
     df['_DATE'] = to_datetime_series(df[date_col]) if date_col else pd.NaT
 
-    # --------------- Attribute map (use friendly display labels, resolve to actual CSV columns) ---------------
+    # --------------- Attribute map (labels -> actual CSV columns) ---------------
     seg_map = {
         'Age':           resolve_col(df, 'AGE_RANGE'),
         'Income':        resolve_col(df, 'INCOME_RANGE'),
@@ -64,9 +63,8 @@ if uploaded:
         'Homeowner':     resolve_col(df, 'HOMEOWNER'),
         'Married':       resolve_col(df, 'MARRIED'),
         'Children':      resolve_col(df, 'CHILDREN'),
-        'State':         state_col,
+        'State':         state_col,                     # <- included like the others
     }
-    # Drop missing
     seg_map = {lbl: col for lbl, col in seg_map.items() if col is not None}
     seg_cols = list(seg_map.values())
 
@@ -74,12 +72,12 @@ if uploaded:
     with st.expander('🔎 Filters', expanded=True):
         dff = df.copy()
 
-        # Treat 'U' as missing for these attributes (if present)
+        # Treat 'U' as missing for these attributes
         for lbl, col in seg_map.items():
             if lbl in ('Gender', 'Credit rating') and col in dff.columns:
                 dff.loc[dff[col].astype(str).str.upper().str.strip() == 'U', col] = pd.NA
 
-        # Date range filter
+        # Date filter
         if not dff['_DATE'].dropna().empty:
             mind, maxd = pd.to_datetime(dff['_DATE'].dropna().min()), pd.to_datetime(dff['_DATE'].dropna().max())
             c1,c2 = st.columns(2)
@@ -93,12 +91,12 @@ if uploaded:
                     mask = mask | dff['_DATE'].isna()
                 dff = dff[mask]
 
-        # SKU contains substring
+        # SKU substring filter
         sku_search = st.text_input('Most Recent SKU contains (optional)')
         if msku_col and sku_search:
             dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
 
-        # Include/exclude + value selections
+        # Include/exclude + selections
         selections = {}
         include_flags = {}
         if seg_cols:
@@ -109,21 +107,19 @@ if uploaded:
                 with cols[idx % 3]:
                     mode = st.selectbox(f'{label}: mode', options=['Include', 'Do not include'], index=0, key=f'mode_{label}')
                     include_flags[col] = (mode == 'Include')
-                    # Show values as they appear in your CSV
                     values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
                     sel = st.multiselect(label, options=values, default=[], help='Empty = All')
                     if sel:
                         selections[col] = sel
                 idx += 1
-            # apply value filters
             for col, vals in selections.items():
                 dff = dff[dff[col].isin(vals)]
 
         st.caption(f'Rows after filters: **{len(dff):,}** / {len(df):,}')
 
-    # --------------- Build GROUPING SETS query ---------------
+    # --------------- Build GROUPING SETS ---------------
     include_cols = [c for c in seg_cols if include_flags.get(c, True)]
-    required_cols = [col for col, vals in selections.items() if len(vals) > 0 and include_flags.get(col, True)]
+    required_cols = [col for col, vals in selections.items() if len(vals)>0 and include_flags.get(col, True)]
 
     con = duckdb.connect()
     con.register('t', dff)
@@ -145,7 +141,7 @@ if uploaded:
 
     grouping_sets_sql = ',\n'.join(sets)
 
-    # Top SKUs (global, among purchasers)
+    # Top SKUs (global among purchasers)
     top_skus = []
     if msku_col and msku_col in dff.columns:
         top_skus = con.execute(
@@ -154,7 +150,7 @@ if uploaded:
             f'GROUP BY 1 ORDER BY c DESC LIMIT 11'
         ).fetchdf()['sku'].astype(str).tolist()
 
-    # Build per-SKU SUM(...) columns safely (no "SKU:" prefix)
+    # Per-SKU buyer counts (no "SKU:" prefix)
     pieces = []
     for sku in top_skus:
         s_escaped = sku.replace("'", "''")
@@ -165,7 +161,6 @@ if uploaded:
     sku_sums = ',\n  '.join(pieces)
     sku_sql = ("\n  ," + sku_sums) if sku_sums else ''
 
-    # Depth expression (still computed but not displayed)
     depth_expr = ' + '.join([f'CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END' for c in attrs]) if attrs else '0'
     attrs_sql = ', '.join([f'"{c}"' for c in attrs]) if attrs else "'All' AS overall"
 
@@ -195,18 +190,15 @@ HAVING COUNT(*) >= ?
     sort_key = {'Conversion %':'conv_rate','Purchases':'Purchases','Visitors':'Visitors'}[metric_choice]
     res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
-    # SKU columns in the same order as top_skus
+    # SKU columns in same order as top_skus
     sku_cols = [c for c in top_skus if c in res.columns]
 
-    # --------------- Build display dataframe (no renaming of attribute headers) ---------------
+    # --------------- Display (use CSV headers as-is) ---------------
     disp = res.copy()
-    # Rank
     disp.insert(0, 'Rank', np.arange(1, len(disp) + 1))
-    # Conversion header: "Conversion" (values as percent string)
     disp = disp.rename(columns={'conv_rate':'Conversion'})
     disp['Conversion'] = res['conv_rate'].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else '')
 
-    # Format ints
     def _fmt_int(v):
         try:
             if v is None or (isinstance(v, float) and np.isnan(v)):
@@ -218,14 +210,11 @@ HAVING COUNT(*) >= ?
     for c in ['Visitors','Purchases','Depth']:
         if c in disp.columns:
             disp[c] = disp[c].map(_fmt_int)
-
     for sc in sku_cols:
         disp[sc] = disp[sc].map(_fmt_int)
 
-    # --------------- Column order (display & CSV) ---------------
-    # Use your requested logical order for attributes, but map to actual CSV columns found
+    # Attribute order (map labels -> actual CSV col names)
     logical_attr_order = ['Gender','Age','Homeowner','Married','Children','Credit rating','Income','Net worth','State']
-    # Map labels -> actual column names (seg_map label -> resolved column name)
     ordered_attr_cols = [seg_map[lbl] for lbl in logical_attr_order if lbl in seg_map and seg_map[lbl] in disp.columns]
 
     table_cols = ['Rank','Visitors','Purchases','Conversion'] + ordered_attr_cols + sku_cols
