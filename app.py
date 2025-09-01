@@ -19,20 +19,17 @@ con = duckdb.connect()
 con.register('customers', df)
 
 # Streamlit UI
-st.title("Expanded Ranked Customer Dashboard")
+st.title("Ranked Customer Dashboard")
 
-# Minimum visitors input
 min_visitors = st.number_input(
     "Minimum number of visitors to show a group",
     min_value=0,
-    value=10,  # Set to 10 for testing (dataset has 197 rows)
+    value=400,
     step=1
 )
 
-# Available attributes
 available_attributes = ['Age_Range', 'Gender', 'Home_Owner', 'Net_Worth', 'Income_Range', 'State', 'Credit_Rating']
 
-# Map display names to CSV column names
 column_mapping = {
     'Age_Range': 'Age Range',
     'Gender': 'Gender',
@@ -43,8 +40,8 @@ column_mapping = {
     'Credit_Rating': 'Credit Rating'
 }
 
-# Select attributes with toggles, 3 per row
 st.write("Select attributes to include:")
+
 selected_attributes = []
 specific_values = {}
 
@@ -55,7 +52,7 @@ for row in rows:
     cols = st.columns(num_cols)
     for idx, attr in enumerate(row):
         with cols[idx]:
-            include = st.checkbox(f"Include {attr}", value=attr in ['Age_Range', 'Gender', 'Home_Owner'], key=f"checkbox_{attr}")
+            include = st.checkbox(f"Include {attr}", value=attr in ['Age_Range', 'Gender', 'Home_Owner'])
             if include:
                 selected_attributes.append(attr)
                 unique_query = f"""
@@ -69,46 +66,45 @@ for row in rows:
                 specific_values[attr] = st.multiselect(
                     f"Values for {attr} (all if empty)",
                     options=unique_list,
-                    default=[],
-                    key=f"multiselect_{attr}"
+                    default=[]
                 )
 
-# Build dynamic query
 if not selected_attributes:
     st.warning("Please include at least one attribute to display the table.")
 else:
-    # Construct cleaned SELECT
     cleaned_select = ", ".join([
         f'CASE WHEN "{column_mapping[col]}" = \'\' OR "{column_mapping[col]}" IS NULL THEN NULL ELSE "{column_mapping[col]}" END AS {col}'
         for col in selected_attributes
     ])
     
-    # Construct WHERE clause for specific values (initial filter)
     where_clauses = []
     for col, vals in specific_values.items():
         if vals:
-            vals_str = ", ".join([f"'{v}'" for v in vals])
-            where_clauses.append(f'"{column_mapping[col]}" IN ({vals_str})')
+            vals_str = ", ".join([f"'{v.replace(\"'\", \"\\\\'\")}'" for v in vals])
+            where_clauses.append(f"{col} IN ({vals_str})")
     
     where_clause = " AND ".join(where_clauses)
     if where_clause:
         where_clause = f"WHERE {where_clause}"
     
-    # Construct final SELECT
     select_clause = ", ".join([f"COALESCE({col}, '') AS {col}" for col in selected_attributes])
     
-    # Construct ANY_VALUE for grouped CTE
+    filtered_attrs = [col for col in selected_attributes if specific_values[col]]
+    non_filtered_attrs = [col for col in selected_attributes if not specific_values[col]]
+    
+    group_by_clause = ", ".join(filtered_attrs) if filtered_attrs else ""
+    if group_by_clause:
+        group_by_clause = f"GROUP BY {group_by_clause}"
+    
+    cube_clause = f"CUBE ({', '.join(non_filtered_attrs)})" if non_filtered_attrs else ""
+    
+    grouping_clause = f"{group_by_clause} {cube_clause}" if group_by_clause or cube_clause else ""
+    
     any_value_clause = ", ".join([f"ANY_VALUE({col}) AS {col}" for col in selected_attributes])
     
-    # GROUP BY clause
-    group_by_clause = ", ".join(selected_attributes)
-    
-    # Filter to exclude rollup NULLs for attributes with specific values
     rollup_filter = []
-    for col, vals in specific_values.items():
-        if vals:
-            vals_str = ", ".join([f"'{v}'" for v in vals])
-            rollup_filter.append(f"COALESCE({col}, '') IN ({vals_str})")
+    for col in filtered_attrs:
+        rollup_filter.append(f"{col} IS NOT NULL")
     
     rollup_filter_clause = " AND ".join(rollup_filter)
     if rollup_filter_clause:
@@ -122,17 +118,6 @@ else:
             Revenue
         FROM customers
         {where_clause}
-    ),
-    grouped AS (
-        SELECT 
-            {any_value_clause},
-            COUNT(*) AS visitors,
-            SUM(Purchase) AS purchases,
-            SUM(Revenue) AS total_revenue,
-            ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate
-        FROM cleaned
-        GROUP BY CUBE ({group_by_clause})
-        HAVING COUNT(*) >= {min_visitors}
     )
     SELECT 
         {select_clause},
@@ -141,12 +126,21 @@ else:
         total_revenue,
         conversion_rate,
         RANK() OVER (ORDER BY total_revenue DESC NULLS LAST) AS rank
-    FROM grouped
+    FROM (
+        SELECT 
+            {any_value_clause},
+            COUNT(*) AS visitors,
+            SUM(Purchase) AS purchases,
+            SUM(Revenue) AS total_revenue,
+            ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate
+        FROM cleaned
+        {grouping_clause}
+        HAVING COUNT(*) >= {min_visitors}
+    ) grouped
     {rollup_filter_clause}
     ORDER BY total_revenue DESC NULLS LAST
     """
     
-    # Execute and display
     try:
         result = con.execute(query).fetchdf()
         if result.empty:
@@ -154,4 +148,4 @@ else:
         else:
             st.dataframe(result, use_container_width=True)
     except Exception as e:
-        st.error(f"Query error: {e}")
+        st.error(f"Query error: {str(e)}")
