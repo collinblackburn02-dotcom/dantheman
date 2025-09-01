@@ -217,8 +217,3 @@ st.download_button(
     file_name="ranked_combinations_precomputed.csv",
     mime="text/csv"
 )
-
-    data=disp.to_csv(index=False).encode("utf-8"),
-    file_name="ranked_combinations_precomputed.csv",
-    mime="text/csv"
-)
