@@ -200,48 +200,46 @@ sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numer
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
 
-    # Normalize 'U' to NA for a couple attrs
     for label in ["Gender", "Credit rating"]:
         c = attr_map.get(label)
         if c:
             dff.loc[dff[c].astype(str).str.upper().str.strip() == "U", c] = pd.NA
 
     selections = {}
-    exclude_flags = {}
+    include_flags = {}
 
     if attr_cols:
         st.markdown("**Attributes**")
         cols = st.columns(3)
         for i, (label, col) in enumerate(attr_map.items()):
             with cols[i % 3]:
-                left, right = st.columns([1, 2])
-                with left:
-                    # Inline exclude
-                    exclude_flags[label] = st.checkbox(label, value=False, key=f"ex_{label}")
-                with right:
-                    # Values list (disabled when excluded)
-                    vals = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                    picked = st.multiselect(
-                        label,
-                        options=vals,
-                        default=[],
-                        disabled=exclude_flags[label],
-                        key=f"ms_{label}",
-                        label_visibility="collapsed",
-                    )
-                    if picked:
-                        selections[col] = picked
+                # Toggle means INCLUDE
+                include_flags[label] = st.checkbox(f"Include {label}", value=True, key=f"inc_{label}")
 
-        # Apply chosen values (for included attrs)
+                # Values list (only enabled if included)
+                vals = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+                picked = st.multiselect(
+                    label,
+                    options=vals,
+                    default=[],
+                    disabled=not include_flags[label],
+                    key=f"ms_{label}",
+                    label_visibility="collapsed",
+                )
+                if picked and include_flags[label]:
+                    selections[col] = picked
+
+        # Apply value selections
         for c, vals in selections.items():
             dff = dff[dff[c].isin(vals)]
 
-        # Apply "Do not include": keep rows where excluded attr is blank
-        for label, do_ex in exclude_flags.items():
-            if do_ex:
+        # Apply exclusion (unchecked)
+        for label, do_inc in include_flags.items():
+            if not do_inc:
                 c = attr_map[label]
                 if c in dff.columns:
                     dff = dff[dff[c].isna() | (dff[c].astype(str).str.strip() == "")]
+
 
     # Min visitors
     if col_visitors:
