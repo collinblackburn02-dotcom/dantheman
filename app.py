@@ -321,11 +321,10 @@ if "Depth_fmt" in table_cols:
 disp = dff[table_cols].rename(columns=rename_map)
 
 # Style: hide "None"/"nan" by blending to bg; bold Conversion
-bg = BRAND["bg"]
 def style_hide_none(v):
     s = str(v).strip().lower()
     if s in ("none", "nan", ""):
-        return f"color: {bg}"
+        return "color: #FFFFFF"
     return ""
 def style_bold(v):
     return "font-weight: 700" if str(v).strip() != "" else ""
