@@ -7,7 +7,7 @@ from utils import resolve_col
 
 st.set_page_config(page_title="Ranked Customer Dashboard — DuckDB", layout="wide")
 st.title("📊 Ranked Customer Dashboard (Fast • DuckDB)")
-st.caption("Counts each person in every qualifying group (1..Max depth). Uses GROUPING SETS. SKU columns come from Most Recent SKU only.")
+st.caption("Counts each person in every qualifying group (1..Max depth) using GROUPING SETS. SKUs from Most Recent SKU only.")
 
 # ---------------- Sidebar ----------------
 with st.sidebar:
@@ -36,12 +36,11 @@ if uploaded:
     email_col    = resolve_col(df, "EMAIL")
     purchase_col = resolve_col(df, "PURCHASE")
     date_col     = resolve_col(df, "DATE")
-    msku_col     = resolve_col(df, "SKU")
+    msku_col     = resolve_col(df, "MOST_RECENT_SKU")
 
     # State: prefer "State", then fallbacks
     state_col = resolve_col(df, "State")
     if state_col is None:
-        # uppercase-agnostic fallbacks
         fallbacks = ["PERSONAL_STATE", "STATE", "US_STATE", "STATE_CODE", "STATE_ABBR"]
         norm = {str(c).strip().upper(): c for c in df.columns}
         for name in fallbacks:
@@ -85,7 +84,6 @@ if uploaded:
         "Children":      resolve_col(df, "CHILDREN"),
         "State":         state_col,
     }
-    # Drop missing attributes
     seg_map = {lbl: col for lbl, col in seg_map.items() if col is not None}
     seg_cols = list(seg_map.values())
 
@@ -144,7 +142,7 @@ if uploaded:
 
         st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
-    # --------------- GROUPING SETS query ---------------
+    # --------------- GROUPING SETS query (distinct people) ---------------
     include_cols = [c for c in seg_cols if include_flags.get(c, True)]
     required_cols = [col for col, vals in selections.items() if len(vals) > 0 and include_flags.get(col, True)]
 
@@ -168,28 +166,27 @@ if uploaded:
 
     grouping_sets_sql = ",\n".join(sets)
 
-    # Top SKUs (global among purchasers)
+    # Top SKUs by distinct buyers
     top_skus = []
     if msku_col and msku_col in dff.columns:
         top_skus = con.execute(
-            f'SELECT "{msku_col}" AS sku, COUNT(*) AS c '
-            f"FROM t WHERE _PURCHASE=1 AND \"{msku_col}\" IS NOT NULL AND TRIM(\"{msku_col}\")<>'' "
-            f"GROUP BY 1 ORDER BY c DESC LIMIT 11"
+            f'SELECT "{msku_col}" AS sku, COUNT(DISTINCT "{email_col}") AS buyers '
+            f'FROM t WHERE _PURCHASE=1 AND "{msku_col}" IS NOT NULL AND TRIM("{msku_col}")<>\'\' '
+            f'GROUP BY 1 ORDER BY buyers DESC LIMIT 11'
         ).fetchdf()["sku"].astype(str).tolist()
 
-    # Per-SKU buyer counts (no 'SKU:' prefix)
+    # Per-SKU distinct buyer counts (no 'SKU:' prefix)
     pieces = []
     for sku in top_skus:
         s_escaped = sku.replace("'", "''")
         pieces.append(
-            'SUM(CASE WHEN "{msku}"=\'{sku}\' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS "{label}"'.format(
-                msku=msku_col, sku=s_escaped, label=sku
-            )
+            'COUNT(DISTINCT CASE WHEN "{msku}"=\'{sku}\' AND _PURCHASE=1 THEN "{email}" END) AS "{label}"'
+            .format(msku=msku_col, sku=s_escaped, email=email_col, label=sku)
         )
     sku_sums = ",\n  ".join(pieces)
     sku_sql = ("\n  ," + sku_sums) if sku_sums else ""
 
-    # Depth expression (computed but we don't show it in final table)
+    # Depth expr (not displayed)
     if attrs:
         depth_terms = [f'CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END' for c in attrs]
         depth_expr = " + ".join(depth_terms)
@@ -198,18 +195,20 @@ if uploaded:
 
     attrs_sql = ", ".join([f'"{c}"' for c in attrs]) if attrs else "'All' AS overall"
 
+    # DISTINCT-based visitors/purchases & conversion
     sql = f"""
 SELECT
   {attrs_sql},
-  COUNT(*) AS Visitors,
-  SUM(_PURCHASE) AS Purchases,
-  100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
+  COUNT(DISTINCT "{email_col}") AS Visitors,
+  COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS Purchases,
+  100.0 * COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END)
+         / NULLIF(COUNT(DISTINCT "{email_col}"), 0) AS conv_rate,
   ({depth_expr}) AS Depth{sku_sql}
 FROM t
 GROUP BY GROUPING SETS (
   {grouping_sets_sql}
 )
-HAVING COUNT(*) >= ?
+HAVING COUNT(DISTINCT "{email_col}") >= ?
     """
 
     # --------------- Run & sort ---------------
@@ -247,7 +246,7 @@ HAVING COUNT(*) >= ?
     for sc in sku_cols:
         disp[sc] = disp[sc].map(_fmt_int)
 
-    # Attribute order: labels -> actual CSV columns
+    # Attribute order -> actual CSV columns
     logical_attr_order = ["Gender", "Age", "Homeowner", "Married", "Children", "Credit rating", "Income", "Net worth", "State"]
     ordered_attr_cols = [seg_map[lbl] for lbl in logical_attr_order if lbl in seg_map and seg_map[lbl] in disp.columns]
 
