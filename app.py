@@ -226,7 +226,6 @@ disp = dff[table_cols].rename(columns=rename_map)
 
 # ================= Show & Download =================
 st.dataframe(disp, use_container_width=True, hide_index=True)
-
 st.download_button(
     "Download ranked combinations (CSV)",
     data=disp.to_csv(index=False).encode("utf-8"),
@@ -234,7 +233,7 @@ st.download_button(
     mime="text/csv"
 )
 
-    data=disp.to_csv(index=False).encode("utf-8"),
+data=disp.to_csv(index=False).encode("utf-8"),
     file_name="ranked_combinations_precomputed.csv",
     mime="text/csv"
 )
