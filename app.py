@@ -229,3 +229,8 @@ HAVING COUNT(*) >= ?
 
 else:
     st.info('Upload the merged CSV to begin.')
+
+                       file_name='ranked_combinations.csv', mime='text/csv')
+
+else:
+    st.info('Upload the merged CSV to begin.')
