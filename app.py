@@ -26,23 +26,27 @@ st.title("Ranked Customer Dashboard")
 min_visitors = st.number_input(
     "Minimum number of visitors to show a group",
     min_value=0,
-    value=10,
+    value=10,  # Default to 10 for testing (dataset has 197 rows)
     step=1,
-    help="Your dataset has 197 rows, so groups can't exceed 197 visitors. Set to 400 for larger datasets."
+    help="Your dataset has 197 rows, so groups can't exceed 197 visitors. Default 400 is for larger datasets."
 )
 
-# Available attributes
-available_attributes = ['Age_Range', 'Gender', 'Home_Owner', 'Net_Worth', 'Income_Range', 'State', 'Credit_Rating']
-
-# Map display names to CSV column names
+# Available attributes (mapped to CSV columns)
+available_attributes = [
+    'Gender', 'Age_Range', 'Income_Range', 'Net_Worth', 'Home_Owner', 'Married',
+    'Children', 'Credit_Rating', 'State'
+]
+# Map display names to CSV column names (handle aliases where needed, like STATE)
 column_mapping = {
-    'Age_Range': 'Age Range',
     'Gender': 'Gender',
-    'Home_Owner': 'Home Owner',
-    'Net_Worth': 'New Worth',
+    'Age_Range': 'Age Range',
     'Income_Range': 'Income Range',
-    'State': 'State',
-    'Credit_Rating': 'Credit Rating'
+    'Net_Worth': 'New Worth',
+    'Home_Owner': 'Home Owner',
+    'Married': 'Married',
+    'Children': 'Children',
+    'Credit_Rating': 'Credit Rating',
+    'State': 'State'  # Could add aliases like 'PERSONAL_STATE' if needed
 }
 
 # Select attributes with toggles, 3 per row
@@ -121,7 +125,7 @@ else:
     WITH cleaned AS (
         SELECT 
             {cleaned_select},
-            Purchase,
+            CASE WHEN Purchase = 1 THEN 1 ELSE 0 END AS is_purchaser,
             Revenue
         FROM customers
         {where_clause}
@@ -130,9 +134,10 @@ else:
         SELECT 
             {group_by_clause},
             COUNT(*) AS visitors,
-            SUM(Purchase) AS purchases,
+            SUM(is_purchaser) AS purchases,
             SUM(Revenue) AS total_revenue,
-            ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate
+            ROUND(SUM(is_purchaser) * 1.0 / COUNT(*), 2) AS conversion_rate,
+            ROW_NUMBER() OVER (PARTITION BY {group_by_clause} ORDER BY total_revenue DESC) AS rn
         FROM cleaned
         GROUP BY CUBE ({group_by_clause})
     )
@@ -144,6 +149,7 @@ else:
         conversion_rate,
         RANK() OVER (ORDER BY total_revenue DESC NULLS LAST) AS rank
     FROM grouped
+    WHERE rn = 1
     {post_filter_clause}
     HAVING COUNT(*) >= {min_visitors}
     ORDER BY total_revenue DESC NULLS LAST
@@ -154,10 +160,11 @@ else:
         st.write("Executing query:", query)  # Debug: Show the query
         result = con.execute(query).fetchdf()
         if result.empty:
-            st.warning(f"No groups meet the minimum visitor threshold of {min_visitors}. Try a lower value (dataset has 197 rows).")
+            st.warning(f"No groups meet the minimum visitor threshold of {min_visitors}. Try a lower value (dataset has {len(df)} rows).")
         else:
             st.dataframe(result, use_container_width=True)
     except Exception as e:
         st.error(f"Query error: {e}")
         st.write("Debug: Selected attributes:", selected_attributes)
         st.write("Specific values:", specific_values)
+        st.write("Data sample:", df.head().to_string())  # Show first few rows for context
