@@ -63,11 +63,11 @@ st.write("Files in directory:", os.listdir())
 
 # Load your CSV (replace with your actual file path, e.g., 'data/Copy of DAN_HHS - Sample.csv')
 try:
-    df = pd.read_csv('Copy of DAN_HHS - Sample (1).csv')
+    df = pd.read_csv('Copy of DAN_HHS - Sample.csv')
     st.write("CSV loaded successfully with", len(df), "rows.")
     st.write("CSV columns:", df.columns.tolist())  # Debug: Show column names
 except FileNotFoundError:
-    st.error("CSV file 'Copy of DAN_HHS - Sample (1).csv' not found! Please check the file path or upload the file to the app directory.")
+    st.error("CSV file 'Copy of DAN_HHS - Sample.csv' not found! Please check the file path or upload the file to the app directory.")
     st.stop()
 
 # Streamlit UI
