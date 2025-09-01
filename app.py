@@ -25,7 +25,7 @@ def resolve(df: pd.DataFrame, *candidates):
     return None
 
 def find_attributes(df: pd.DataFrame):
-    """Identify known attribute columns by typical names."""
+    """Identify known attribute columns by typical names; returns {friendly_label: actual_col} (only present ones)."""
     attr_map = {
         "Gender":        resolve(df, "Gender", "GENDER"),
         "Age":           resolve(df, "Age_Range", "AGE_RANGE", "Age", "AGE"),
@@ -73,7 +73,7 @@ col_depth      = resolve(df, "Depth")
 attr_map = find_attributes(df)
 attr_cols = [attr_map[k] for k in attr_map]
 
-# SKU columns = numeric columns not in metrics/attributes
+# SKU columns = numeric columns not in metrics/attributes/rank/depth
 reserved = set([c for c in [col_rank, col_visitors, col_purchases, col_conversion, col_depth] if c]) | set(attr_cols)
 sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numeric_dtype(df[c])]
 
@@ -81,24 +81,44 @@ sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numer
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
 
+    # Optionally treat 'U' as missing for these attributes
     for label in ["Gender", "Credit rating"]:
         col = attr_map.get(label)
         if col:
             dff.loc[dff[col].astype(str).str.upper().str.strip() == "U", col] = pd.NA
 
     selections = {}
+    exclude_flags = {}  # label -> True/False ("Do not include")
     if attr_cols:
         st.markdown("**Attributes**")
         cols = st.columns(3)
         for i, (label, col) in enumerate(attr_map.items()):
             with cols[i % 3]:
-                vals = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                pick = st.multiselect(label, options=vals, default=[], key=f"ms_{label}")
-                if pick:
-                    selections[col] = pick
+                # New: Do not include toggle
+                exclude_flags[label] = st.checkbox(f"Do not include {label}", value=False, key=f"ex_{label}")
+
+                # If NOT excluded, allow picking specific values to include
+                if not exclude_flags[label]:
+                    vals = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+                    pick = st.multiselect(label, options=vals, default=[], key=f"ms_{label}")
+                    if pick:
+                        selections[col] = pick
+
+        # Apply value selections (only for included attributes)
         for col, vals in selections.items():
             dff = dff[dff[col].isin(vals)]
 
+        # Apply "Do not include" filters -> keep rows where the excluded attribute is blank/NA
+        for label, do_exclude in exclude_flags.items():
+            if do_exclude:
+                col = attr_map[label]
+                if col in dff.columns:
+                    dff = dff[
+                        dff[col].isna() |
+                        (dff[col].astype(str).str.strip() == "")
+                    ]
+
+    # Enforce min Visitors if present
     if col_visitors:
         dff[col_visitors] = pd.to_numeric(dff[col_visitors], errors="coerce")
         dff = dff[dff[col_visitors] >= int(min_rows)]
@@ -120,12 +140,12 @@ if sort_col is None:
     st.stop()
 
 dff = dff.sort_values(sort_col, ascending=False, na_position="last").head(top_n).reset_index(drop=True)
-# Recompute Rank for the current sorted/filter view
+
+# Safe rank: overwrite if exists, else insert
 if "Rank" in dff.columns:
     dff["Rank"] = np.arange(1, len(dff) + 1)
 else:
     dff.insert(0, "Rank", np.arange(1, len(dff) + 1))
-
 
 # ---------------- Formatting ----------------
 if col_visitors:
@@ -149,9 +169,15 @@ for sc in sku_cols:
     dff[sc] = fmt_int_series(pd.to_numeric(dff[sc], errors="coerce"))
 
 # ---------------- Column order ----------------
-attr_order_labels = ["Gender", "Age", "Homeowner", "Married", "Children",
-                     "Credit rating", "Income", "Net worth", "State"]
-ordered_attr_cols = [attr_map[lbl] for lbl in attr_order_labels if lbl in attr_map]
+attr_order_labels = [
+    "Gender", "Age", "Homeowner", "Married", "Children",
+    "Credit rating", "Income", "Net worth", "State"
+]
+
+# Hide any attributes the user marked "Do not include"
+excluded_labels = {lbl for lbl, flag in exclude_flags.items() if flag} if "exclude_flags" in locals() else set()
+visible_attr_labels = [lbl for lbl in attr_order_labels if lbl in attr_map and lbl not in excluded_labels]
+ordered_attr_cols = [attr_map[lbl] for lbl in visible_attr_labels]
 
 table_cols = ["Rank"]
 if col_visitors:   table_cols.append("Visitors_fmt")
@@ -162,8 +188,11 @@ table_cols += sku_cols
 if col_depth and "Depth_fmt" in dff.columns:
     table_cols.append("Depth_fmt")
 
-rename_map = {"Visitors_fmt": "Visitors", "Purchasers_fmt": "Purchasers",
-              "Conversion_fmt": "Conversion"}
+rename_map = {
+    "Visitors_fmt": "Visitors",
+    "Purchasers_fmt": "Purchasers",
+    "Conversion_fmt": "Conversion",
+}
 if "Depth_fmt" in table_cols:
     rename_map["Depth_fmt"] = "Depth"
 
