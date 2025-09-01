@@ -1,21 +1,28 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
 st.set_page_config(page_title="Ranked Customer Dashboard — Precomputed CSV", layout="wide")
-st.title("📊 Ranked Customer Dashboard")
+st.title("📊 Ranked Customer Dashboard (Precomputed CSV)")
 st.caption("Auto-loads your CSV from the repo. No upload needed. Skips first 3 rows, then filters/ranks/displays.")
 
-# ---------------- Sidebar ----------------
+# ================= Sidebar =================
 with st.sidebar:
-    uploaded = st.file_uploader("Upload precomputed CSV", type=["csv"])
-    st.markdown("---")
+    st.markdown("### Controls")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
     top_n = st.slider("Top N", 10, 2000, 50, 10)
-    # Min visitors: floor 100, default 100
+    # Minimum visitors: floor 100, default 100
     min_rows = st.number_input("Minimum Visitors per group", min_value=100, value=100, step=1)
 
-# ---------------- Helpers ----------------
+    st.markdown("---")
+    with st.expander("Advanced (CSV location)"):
+        st.write("If you rename or move the CSV, set the new repo-relative path here.")
+        default_csv_path = "Copy of DAN_HHS - Sample.csv"
+        override_path = st.text_input("CSV path (repo-relative)", value=default_csv_path, help="Example: data/yourfile.csv")
+        skiprows = st.number_input("Header rows to skip", min_value=0, value=3, step=1)
+
+# ================= Helpers =================
 def resolve(df: pd.DataFrame, *candidates):
     """Return the first matching column (case-insensitive), else None."""
     norm = {str(c).strip().lower(): c for c in df.columns}
@@ -59,13 +66,39 @@ def looks_like_percent_strings(s: pd.Series) -> bool:
         return (sample.str.contains("%").mean() > 0.6)
     return False
 
-# ---------------- Main ----------------
-if not uploaded:
-    st.info("Upload the precomputed CSV (the one you exported from Sheets) to begin.")
+def load_repo_csv(path_str: str, skiprows: int) -> pd.DataFrame:
+    """
+    Try to load a CSV from the repo:
+      1) exact path_str
+      2) ./data/path_str basename
+      3) ./datasets/path_str basename
+      4) ./assets/path_str basename
+    """
+    base = Path.cwd()
+    candidates = [
+        base / path_str,
+        base / "data" / Path(path_str).name,
+        base / "datasets" / Path(path_str).name,
+        base / "assets" / Path(path_str).name,
+    ]
+    last_err = None
+    for p in candidates:
+        try:
+            if p.exists():
+                df = pd.read_csv(p, skiprows=skiprows)
+                return df
+        except Exception as e:
+            last_err = e
+    # If we reach here, show a helpful error
+    msg = f"Could not find/read CSV at any of these paths:\n" + "\n".join([str(c) for c in candidates])
+    if last_err:
+        msg += f"\n\nLast error: {last_err}"
+    st.error(msg)
     st.stop()
 
-# Load CSV (skip first 3 rows for real header)
-raw = pd.read_csv(uploaded, skiprows=3)
+# ================= Main =================
+# Load CSV from the repo (no uploader)
+raw = load_repo_csv(override_path, skiprows=skiprows)
 raw.columns = [str(c).strip() for c in raw.columns]
 
 # Drop unnamed or all-empty columns
@@ -86,7 +119,7 @@ attr_cols = [attr_map[k] for k in attr_map]
 reserved = set([c for c in [col_rank, col_visitors, col_purchases, col_conversion, col_depth] if c]) | set(attr_cols)
 sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numeric_dtype(df[c])]
 
-# ---------------- Filters ----------------
+# ================= Filters =================
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
 
@@ -134,7 +167,7 @@ with st.expander("🔎 Filters", expanded=True):
 
     st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
-# ---------------- Sorting & Ranking ----------------
+# ================= Sorting & Ranking =================
 computed_conv_col = None
 if col_conversion is None and col_visitors and col_purchases:
     computed_conv_col = "__conv"
@@ -156,64 +189,7 @@ if "Rank" in dff.columns:
 else:
     dff.insert(0, "Rank", np.arange(1, len(dff) + 1))
 
-# ---------------- Formatting ----------------
+# ================= Formatting =================
 if col_visitors:
     dff["Visitors_fmt"] = fmt_int_series(pd.to_numeric(dff[col_visitors], errors="coerce"))
 if col_purchases:
-    dff["Purchasers_fmt"] = fmt_int_series(pd.to_numeric(dff[col_purchases], errors="coerce"))
-if col_depth and col_depth in dff.columns:
-    dff["Depth_fmt"] = fmt_int_series(pd.to_numeric(dff[col_depth], errors="coerce"))
-
-if col_conversion:
-    if looks_like_percent_strings(dff[col_conversion]):
-        dff["Conversion_fmt"] = dff[col_conversion].astype(str)
-    else:
-        dff["Conversion_fmt"] = pd.to_numeric(dff[col_conversion], errors="coerce").map(
-            lambda x: "" if pd.isna(x) else f"{x:.2f}%"
-        )
-else:
-    dff["Conversion_fmt"] = ""
-
-for sc in sku_cols:
-    dff[sc] = fmt_int_series(pd.to_numeric(dff[sc], errors="coerce"))
-
-# ---------------- Column order ----------------
-# Add the new attribute labels to the display order
-attr_order_labels = [
-    "Gender", "Age", "Homeowner", "Married", "Children",
-    "Credit rating", "Income", "Net worth", "State",
-    "Ethnicity (skiptrace)", "Department", "Seniority level", "Skiptrace credit"
-]
-
-# Hide any attributes the user marked "Do not include"
-excluded_labels = {lbl for lbl, flag in exclude_flags.items() if flag} if "exclude_flags" in locals() else set()
-visible_attr_labels = [lbl for lbl in attr_order_labels if lbl in attr_map and lbl not in excluded_labels]
-ordered_attr_cols = [attr_map[lbl] for lbl in visible_attr_labels]
-
-table_cols = ["Rank"]
-if col_visitors:   table_cols.append("Visitors_fmt")
-if col_purchases:  table_cols.append("Purchasers_fmt")
-table_cols.append("Conversion_fmt")
-table_cols += ordered_attr_cols
-table_cols += sku_cols
-if col_depth and "Depth_fmt" in dff.columns:
-    table_cols.append("Depth_fmt")
-
-rename_map = {
-    "Visitors_fmt": "Visitors",
-    "Purchasers_fmt": "Purchasers",
-    "Conversion_fmt": "Conversion",
-}
-if "Depth_fmt" in table_cols:
-    rename_map["Depth_fmt"] = "Depth"
-
-disp = dff[table_cols].rename(columns=rename_map)
-
-# ---------------- Show & Download ----------------
-st.dataframe(disp, use_container_width=True, hide_index=True)
-st.download_button(
-    "Download ranked combinations (CSV)",
-    data=disp.to_csv(index=False).encode("utf-8"),
-    file_name="ranked_combinations_precomputed.csv",
-    mime="text/csv"
-)
