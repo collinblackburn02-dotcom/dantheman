@@ -25,7 +25,7 @@ st.title("Ranked Customer Dashboard")
 min_visitors = st.number_input(
     "Minimum number of visitors to show a group",
     min_value=0,
-    value=10,  # Default to 10 for testing (dataset has 197 rows; use 400 for larger datasets)
+    value=10,  # Default to 10 for testing (dataset has 197 rows)
     step=1,
     help="Your dataset has 197 rows, so groups can't exceed 197 visitors. Set to 400 for larger datasets."
 )
@@ -56,7 +56,7 @@ for row in rows:
     cols = st.columns(num_cols)
     for idx, attr in enumerate(row):
         with cols[idx]:
-            include = st.checkbox(f"Include {attr}", value=attr in ['Age_Range', 'Gender', 'Home_Owner'], key=f"checkbox_{attr}")
+            include = st.checkbox(f"Include {attr}", value=True, key=f"checkbox_{attr}")
             if include:
                 selected_attributes.append(attr)
                 unique_query = f"""
@@ -101,6 +101,17 @@ else:
     # GROUP BY clause
     group_by_clause = ", ".join(selected_attributes)
     
+    # Post-grouping filter for specific values
+    post_filter = []
+    for col, vals in specific_values.items():
+        if vals:
+            vals_str = ", ".join([f"'{v}'" for v in vals])
+            post_filter.append(f"COALESCE({col}, '') IN ({vals_str})")
+    
+    post_filter_clause = " AND ".join(post_filter)
+    if post_filter_clause:
+        post_filter_clause = f"WHERE {post_filter_clause}"
+    
     query = f"""
     WITH cleaned AS (
         SELECT 
@@ -109,17 +120,29 @@ else:
             Revenue
         FROM customers
         {where_clause}
+    ),
+    grouped AS (
+        SELECT 
+            {group_by_clause},
+            COUNT(*) AS visitors,
+            SUM(Purchase) AS purchases,
+            SUM(Revenue) AS total_revenue,
+            ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate,
+            ROW_NUMBER() OVER (PARTITION BY {group_by_clause} ORDER BY total_revenue DESC) AS rn
+        FROM cleaned
+        GROUP BY CUBE ({group_by_clause})
+        HAVING COUNT(*) >= {min_visitors}
     )
     SELECT 
         {select_clause},
-        COUNT(*) AS visitors,
-        SUM(Purchase) AS purchases,
-        SUM(Revenue) AS total_revenue,
-        ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate,
+        visitors,
+        purchases,
+        total_revenue,
+        conversion_rate,
         RANK() OVER (ORDER BY total_revenue DESC NULLS LAST) AS rank
-    FROM cleaned
-    GROUP BY {group_by_clause}
-    HAVING COUNT(*) >= {min_visitors}
+    FROM grouped
+    WHERE rn = 1
+    {post_filter_clause}
     ORDER BY total_revenue DESC NULLS LAST
     """
     
