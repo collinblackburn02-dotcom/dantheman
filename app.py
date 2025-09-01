@@ -10,7 +10,7 @@ st.caption("Auto-loads your CSV from the repo. No upload needed. Skips first 3 r
 # ================= Sidebar =================
 with st.sidebar:
     st.markdown("### Controls")
-    metric_choice = st.radio("Sort metric", ["Conversion %", "Purchasers", "Visitors"], index=0)
+    metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
     top_n = st.slider("Top N", 10, 2000, 50, 10)
     # Minimum visitors: floor 100, default 100
     min_rows = st.number_input("Minimum Visitors per group", min_value=100, value=100, step=1)
@@ -24,7 +24,6 @@ with st.sidebar:
 
 # ================= Helpers =================
 def resolve(df: pd.DataFrame, *candidates):
-    """Return the first matching column (case-insensitive), else None."""
     norm = {str(c).strip().lower(): c for c in df.columns}
     for cand in candidates:
         k = str(cand).strip().lower()
@@ -33,10 +32,6 @@ def resolve(df: pd.DataFrame, *candidates):
     return None
 
 def find_attributes(df: pd.DataFrame):
-    """
-    Identify attribute columns by typical names; returns {friendly_label: actual_col}.
-    (We keep friendly labels for the UI; the table uses your exact CSV headers.)
-    """
     attr_map = {
         "Gender":               resolve(df, "Gender", "GENDER"),
         "Age":                  resolve(df, "Age_Range", "AGE_RANGE", "Age", "AGE"),
@@ -67,13 +62,6 @@ def looks_like_percent_strings(s: pd.Series) -> bool:
     return False
 
 def load_repo_csv(path_str: str, skiprows: int) -> pd.DataFrame:
-    """
-    Try to load a CSV from the repo:
-      1) exact path_str
-      2) ./data/path_str basename
-      3) ./datasets/path_str basename
-      4) ./assets/path_str basename
-    """
     base = Path.cwd()
     candidates = [
         base / path_str,
@@ -89,7 +77,6 @@ def load_repo_csv(path_str: str, skiprows: int) -> pd.DataFrame:
                 return df
         except Exception as e:
             last_err = e
-    # If we reach here, show a helpful error
     msg = f"Could not find/read CSV at any of these paths:\n" + "\n".join([str(c) for c in candidates])
     if last_err:
         msg += f"\n\nLast error: {last_err}"
@@ -97,11 +84,9 @@ def load_repo_csv(path_str: str, skiprows: int) -> pd.DataFrame:
     st.stop()
 
 # ================= Main =================
-# Load CSV from the repo (no uploader)
 raw = load_repo_csv(override_path, skiprows=skiprows)
 raw.columns = [str(c).strip() for c in raw.columns]
 
-# Drop unnamed or all-empty columns
 df = raw.loc[:, ~raw.columns.str.match(r"^Unnamed:\s*\d+$")]
 df = df.dropna(axis=1, how="all")
 
@@ -109,48 +94,42 @@ df = df.dropna(axis=1, how="all")
 col_rank       = resolve(df, "Rank")
 col_visitors   = resolve(df, "Visitors", "VISITORS")
 col_purchases  = resolve(df, "Purchasers", "Purchases", "BUYERS")
-col_conversion = resolve(df, "Conversion %", "Conversion", "CONVERSION %", "CONVERSION")
+col_conversion = resolve(
+    df,
+    "Conversion %", "Conversion", "CONVERSION %", "CONVERSION",
+    "Conversion%", "conversion%", "Conv", "CVR", "conversion_rate", "Conversion Rate"
+)
 col_depth      = resolve(df, "Depth")
 
 attr_map = find_attributes(df)
 attr_cols = [attr_map[k] for k in attr_map]
 
-# SKU columns = numeric columns not in metrics/attributes/rank/depth
 reserved = set([c for c in [col_rank, col_visitors, col_purchases, col_conversion, col_depth] if c]) | set(attr_cols)
 sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numeric_dtype(df[c])]
 
 # ================= Filters =================
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
-
-    # Optionally treat 'U' as missing for these attributes
     for label in ["Gender", "Credit rating"]:
         col = attr_map.get(label)
         if col:
             dff.loc[dff[col].astype(str).str.upper().str.strip() == "U", col] = pd.NA
 
     selections = {}
-    exclude_flags = {}  # label -> True/False ("Do not include")
+    exclude_flags = {}
     if attr_cols:
         st.markdown("**Attributes**")
         cols = st.columns(3)
         for i, (label, col) in enumerate(attr_map.items()):
             with cols[i % 3]:
-                # Do not include toggle
                 exclude_flags[label] = st.checkbox(f"Do not include {label}", value=False, key=f"ex_{label}")
-
-                # If NOT excluded, allow picking specific values to include
                 if not exclude_flags[label]:
                     vals = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
                     pick = st.multiselect(label, options=vals, default=[], key=f"ms_{label}")
                     if pick:
                         selections[col] = pick
-
-        # Apply value selections (only for included attributes)
         for col, vals in selections.items():
             dff = dff[dff[col].isin(vals)]
-
-        # Apply "Do not include" filters -> keep rows where the excluded attribute is blank/NA
         for label, do_exclude in exclude_flags.items():
             if do_exclude:
                 col = attr_map[label]
@@ -159,16 +138,12 @@ with st.expander("🔎 Filters", expanded=True):
                         dff[col].isna() |
                         (dff[col].astype(str).str.strip() == "")
                     ]
-
-    # Enforce min Visitors if present
     if col_visitors:
         dff[col_visitors] = pd.to_numeric(dff[col_visitors], errors="coerce")
         dff = dff[dff[col_visitors] >= int(min_rows)]
-
     st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
 # ================= Sorting & Ranking =================
-computed_conv_col = None
 if col_conversion is None and col_visitors and col_purchases:
     computed_conv_col = "__conv"
     dff[computed_conv_col] = 100.0 * pd.to_numeric(dff[col_purchases], errors="coerce") / \
@@ -176,14 +151,23 @@ if col_conversion is None and col_visitors and col_purchases:
     col_conversion = computed_conv_col
 
 sort_map = {"Conversion": col_conversion, "Purchasers": col_purchases, "Visitors": col_visitors}
-sort_col = sort_map[metric_choice]
+sort_col = sort_map.get(metric_choice)
+
 if sort_col is None:
-    st.error(f"Missing column required to sort by '{metric_choice}'. Please include it in your CSV.")
-    st.stop()
+    if col_purchases is not None:
+        st.warning("‘Conversion’ not found. Sorting by Purchasers instead.")
+        metric_choice = "Purchasers"
+        sort_col = col_purchases
+    elif col_visitors is not None:
+        st.warning("‘Conversion’ not found. Sorting by Visitors instead.")
+        metric_choice = "Visitors"
+        sort_col = col_visitors
+    else:
+        st.error("Couldn’t find usable sort columns (Conversion, Purchasers, or Visitors). Please add them to the CSV.")
+        st.stop()
 
 dff = dff.sort_values(sort_col, ascending=False, na_position="last").head(top_n).reset_index(drop=True)
 
-# Safe rank: overwrite if exists, else insert
 if "Rank" in dff.columns:
     dff["Rank"] = np.arange(1, len(dff) + 1)
 else:
@@ -244,6 +228,11 @@ disp = dff[table_cols].rename(columns=rename_map)
 st.dataframe(disp, use_container_width=True, hide_index=True)
 st.download_button(
     "Download ranked combinations (CSV)",
+    data=disp.to_csv(index=False).encode("utf-8"),
+    file_name="ranked_combinations_precomputed.csv",
+    mime="text/csv"
+)
+
     data=disp.to_csv(index=False).encode("utf-8"),
     file_name="ranked_combinations_precomputed.csv",
     mime="text/csv"
