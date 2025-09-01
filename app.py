@@ -215,14 +215,14 @@ with st.expander("🔎 Filters", expanded=True):
             with cols[i % 3]:
                 # Toggle means INCLUDE
                 default_included = {
-    "Ethnicity (skiptrace)": False,
-    "Department": False,
-    "Seniority level": False,
-}
-include_flags[label] = st.checkbox(
-    f"Include {label}",
-    value=default_included.get(label, True),  # default False for the three attributes, True for others
-    key=f"inc_{label}"
+                    "Ethnicity (skiptrace)": False,
+                    "Department": False,
+                    "Seniority level": False,
+                }
+                include_flags[label] = st.checkbox(
+                    f"Include {label}",
+                    value=default_included.get(label, True),  # default False for the three attributes, True for others
+                    key=f"inc_{label}"
 )
 
 
