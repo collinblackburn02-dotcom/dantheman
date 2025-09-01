@@ -170,9 +170,10 @@ def looks_like_percent_strings(s: pd.Series) -> bool:
     return False
 
 # ================ Main: load CSV =================
+CSV_URL = "https://raw.githubusercontent.com/collinblackburn02-dotcom/dantheman/main/Copy%20of%20DAN_HHS%20-%20Sample.csv"
 
 # Real header starts at row 4
-raw = pd.read_csv(uploaded, skiprows=3)
+raw = pd.read_csv(CSV_URL, skiprows=3)
 raw.columns = [str(c).strip() for c in raw.columns]
 
 # Clean frame
