@@ -12,7 +12,8 @@ with st.sidebar:
     st.markdown("---")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
     top_n = st.slider("Top N", 10, 2000, 50, 10)
-    min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
+    # Min visitors: floor 100, default 100
+    min_rows = st.number_input("Minimum Visitors per group", min_value=100, value=100, step=1)
 
 # ---------------- Helpers ----------------
 def resolve(df: pd.DataFrame, *candidates):
@@ -25,17 +26,24 @@ def resolve(df: pd.DataFrame, *candidates):
     return None
 
 def find_attributes(df: pd.DataFrame):
-    """Identify known attribute columns by typical names; returns {friendly_label: actual_col} (only present ones)."""
+    """
+    Identify attribute columns by typical names; returns {friendly_label: actual_col}.
+    (We keep friendly labels for the UI; the table uses your exact CSV headers.)
+    """
     attr_map = {
-        "Gender":        resolve(df, "Gender", "GENDER"),
-        "Age":           resolve(df, "Age_Range", "AGE_RANGE", "Age", "AGE"),
-        "Homeowner":     resolve(df, "Homeowner", "HOMEOWNER"),
-        "Married":       resolve(df, "Married", "MARRIED"),
-        "Children":      resolve(df, "Children", "CHILDREN"),
-        "Credit rating": resolve(df, "Credit_Rating", "CREDIT_RATING", "Credit", "CREDIT"),
-        "Income":        resolve(df, "Income_Range", "INCOME_RANGE", "Income", "INCOME"),
-        "Net worth":     resolve(df, "New_Worth", "NET_WORTH", "NETWORTH", "Net_Worth"),
-        "State":         resolve(df, "State", "PERSONAL_STATE", "STATE"),
+        "Gender":               resolve(df, "Gender", "GENDER"),
+        "Age":                  resolve(df, "Age_Range", "AGE_RANGE", "Age", "AGE"),
+        "Homeowner":            resolve(df, "Homeowner", "HOMEOWNER"),
+        "Married":              resolve(df, "Married", "MARRIED"),
+        "Children":             resolve(df, "Children", "CHILDREN"),
+        "Credit rating":        resolve(df, "Credit_Rating", "CREDIT_RATING", "Credit", "CREDIT"),
+        "Income":               resolve(df, "Income_Range", "INCOME_RANGE", "Income", "INCOME"),
+        "Net worth":            resolve(df, "New_Worth", "NET_WORTH", "NETWORTH", "Net_Worth"),
+        "State":                resolve(df, "State", "PERSONAL_STATE", "STATE"),
+        # New selectors you asked for:
+        "Ethnicity (skiptrace)": resolve(df, "SKIPTRACE_ETHNIC_CODE", "Skiptrace_Ethnic_Code"),
+        "Department":           resolve(df, "DEPARTMENT", "Department"),
+        "Seniority level":      resolve(df, "SENIORITY_LEVEL", "Seniority_Level", "Seniority"),
     }
     return {k: v for k, v in attr_map.items() if v is not None}
 
@@ -94,7 +102,7 @@ with st.expander("🔎 Filters", expanded=True):
         cols = st.columns(3)
         for i, (label, col) in enumerate(attr_map.items()):
             with cols[i % 3]:
-                # New: Do not include toggle
+                # Do not include toggle
                 exclude_flags[label] = st.checkbox(f"Do not include {label}", value=False, key=f"ex_{label}")
 
                 # If NOT excluded, allow picking specific values to include
@@ -169,9 +177,11 @@ for sc in sku_cols:
     dff[sc] = fmt_int_series(pd.to_numeric(dff[sc], errors="coerce"))
 
 # ---------------- Column order ----------------
+# Add the new attribute labels to the display order
 attr_order_labels = [
     "Gender", "Age", "Homeowner", "Married", "Children",
-    "Credit rating", "Income", "Net worth", "State"
+    "Credit rating", "Income", "Net worth", "State",
+    "Ethnicity (skiptrace)", "Department", "Seniority level"
 ]
 
 # Hide any attributes the user marked "Do not include"
