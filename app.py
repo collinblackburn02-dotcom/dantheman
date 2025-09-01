@@ -28,25 +28,21 @@ min_visitors = st.number_input(
     min_value=0,
     value=10,  # Default to 10 for testing (dataset has 197 rows)
     step=1,
-    help="Your dataset has 197 rows, so groups can't exceed 197 visitors. Default 400 is for larger datasets."
+    help="Your dataset has 197 rows, so groups can't exceed 197 visitors. Set to 400 for larger datasets."
 )
 
-# Available attributes (mapped to CSV columns)
-available_attributes = [
-    'Gender', 'Age_Range', 'Income_Range', 'Net_Worth', 'Home_Owner', 'Married',
-    'Children', 'Credit_Rating', 'State'
-]
-# Map display names to CSV column names (handle aliases where needed, like STATE)
+# Available attributes
+available_attributes = ['Gender', 'Age_Range', 'Home_Owner', 'Net_Worth', 'Income_Range', 'State', 'Credit_Rating']
+
+# Map display names to CSV column names
 column_mapping = {
     'Gender': 'Gender',
     'Age_Range': 'Age Range',
-    'Income_Range': 'Income Range',
-    'Net_Worth': 'New Worth',
     'Home_Owner': 'Home Owner',
-    'Married': 'Married',
-    'Children': 'Children',
-    'Credit_Rating': 'Credit Rating',
-    'State': 'State'  # Could add aliases like 'PERSONAL_STATE' if needed
+    'Net_Worth': 'New Worth',
+    'Income_Range': 'Income Range',
+    'State': 'State',
+    'Credit_Rating': 'Credit Rating'
 }
 
 # Select attributes with toggles, 3 per row
@@ -104,8 +100,8 @@ else:
     if where_clause:
         st.write("Applied filters:", where_clause)
 
-    # Construct final SELECT
-    select_clause = ", ".join([f"COALESCE({col}, '') AS {col}" for col in selected_attributes])
+    # Construct final SELECT with ANY_VALUE
+    select_clause = ", ".join([f"ANY_VALUE(COALESCE({col}, '')) AS {col}" for col in selected_attributes])
     
     # GROUP BY clause
     group_by_clause = ", ".join(selected_attributes)
@@ -115,7 +111,7 @@ else:
     for col, vals in specific_values.items():
         if vals:
             vals_str = ", ".join([f"'{v}'" for v in vals])
-            post_filter.append(f"COALESCE({col}, '') IN ({vals_str})")
+            post_filter.append(f"ANY_VALUE(COALESCE({col}, '')) IN ({vals_str})")
     
     post_filter_clause = " AND ".join(post_filter)
     if post_filter_clause:
@@ -140,6 +136,7 @@ else:
             ROW_NUMBER() OVER (PARTITION BY {group_by_clause} ORDER BY total_revenue DESC) AS rn
         FROM cleaned
         GROUP BY CUBE ({group_by_clause})
+        HAVING COUNT(*) >= {min_visitors}
     )
     SELECT 
         {select_clause},
@@ -151,7 +148,6 @@ else:
     FROM grouped
     WHERE rn = 1
     {post_filter_clause}
-    HAVING COUNT(*) >= {min_visitors}
     ORDER BY total_revenue DESC NULLS LAST
     """
     
