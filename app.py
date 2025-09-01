@@ -1,266 +1,204 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import duckdb
-from itertools import combinations
-from utils import resolve_col
 
-st.set_page_config(page_title="Ranked Customer Dashboard — DuckDB", layout="wide")
-st.title("📊 Ranked Customer Dashboard (Fast • DuckDB)")
-st.caption("Counts each person in every qualifying group (1..Max depth) using GROUPING SETS. SKUs from Most Recent SKU only.")
+st.set_page_config(page_title="Ranked Customer Dashboard — Precomputed CSV", layout="wide")
+st.title("📊 Ranked Customer Dashboard (Precomputed CSV)")
+st.caption("Loads your Sheets export (skip first 3 rows), then filters, ranks, and displays. No recomputation.")
 
 # ---------------- Sidebar ----------------
 with st.sidebar:
-    uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
-    st.markdown('---')
-    metric_choice = st.radio("Sort metric", ["Conversion %", "Purchases", "Visitors"], index=0)
-    max_depth = st.slider("Max combo depth", 1, 4, 2, 1)
-    top_n = st.slider("Top N", 10, 1000, 50, 10)
+    uploaded = st.file_uploader("Upload precomputed CSV", type=["csv"])
+    st.markdown("---")
+    metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
+    top_n = st.slider("Top N", 10, 2000, 50, 10)
+    min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
 
-@st.cache_data(show_spinner=False)
-def load_df(file):
-    df = pd.read_csv(file)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+# ---------------- Helpers ----------------
+def resolve(df: pd.DataFrame, *candidates):
+    """Return the first matching column (case-insensitive), else None."""
+    norm = {str(c).strip().lower(): c for c in df.columns}
+    for cand in candidates:
+        k = str(cand).strip().lower()
+        if k in norm:
+            return norm[k]
+    return None
 
-def to_datetime_series(s: pd.Series) -> pd.Series:
-    try:
-        return pd.to_datetime(s, errors="coerce")
-    except Exception:
-        return pd.to_datetime(pd.Series([None] * len(s)))
-
-if uploaded:
-    # --------------- Load & resolve columns ---------------
-    df = load_df(uploaded)
-
-    email_col    = resolve_col(df, "EMAIL")
-    purchase_col = resolve_col(df, "PURCHASE")
-    date_col     = resolve_col(df, "DATE")
-    msku_col     = resolve_col(df, "MOST_RECENT_SKU")
-
-    # State: prefer "State", then fallbacks
-    state_col = resolve_col(df, "State")
-    if state_col is None:
-        fallbacks = ["PERSONAL_STATE", "STATE", "US_STATE", "STATE_CODE", "STATE_ABBR"]
-        norm = {str(c).strip().upper(): c for c in df.columns}
-        for name in fallbacks:
-            if name.upper() in norm:
-                state_col = norm[name.upper()]
-                break
-
-    # Net worth: prefer "New_Worth", then fallbacks
-    networth_col = resolve_col(df, "New_Worth")
-    if networth_col is None:
-        for alt in ["NET_WORTH", "NETWORTH", "Net_Worth", "Networth"]:
-            networth_col = resolve_col(df, alt)
-            if networth_col is not None:
-                break
-
-    if email_col is None or purchase_col is None:
-        st.error("Missing EMAIL or PURCHASE column.")
-        st.stop()
-
-    # Purchase -> 0/1
-    s = df[purchase_col]
-    if pd.api.types.is_numeric_dtype(s):
-        df["_PURCHASE"] = (s.fillna(0) > 0).astype(int)
-    else:
-        vals = s.astype(str).str.strip().str.lower()
-        yes = {"1", "true", "t", "yes", "y", "buyer", "purchased"}
-        df["_PURCHASE"] = vals.isin(yes).astype(int)
-
-    # Optional date parsing for filters
-    df["_DATE"] = to_datetime_series(df[date_col]) if date_col else pd.NaT
-
-    # --------------- Attribute map (labels -> actual CSV columns) ---------------
-    seg_map = {
-        "Age":           resolve_col(df, "AGE_RANGE"),
-        "Income":        resolve_col(df, "INCOME_RANGE"),
-        "Net worth":     networth_col,
-        "Credit rating": resolve_col(df, "CREDIT_RATING"),
-        "Gender":        resolve_col(df, "GENDER"),
-        "Homeowner":     resolve_col(df, "HOMEOWNER"),
-        "Married":       resolve_col(df, "MARRIED"),
-        "Children":      resolve_col(df, "CHILDREN"),
-        "State":         state_col,
-    }
-    seg_map = {lbl: col for lbl, col in seg_map.items() if col is not None}
-    seg_cols = list(seg_map.values())
-
-    # --------------- Filters ---------------
-    with st.expander("🔎 Filters", expanded=True):
-        dff = df.copy()
-
-        # Treat 'U' as missing for these attributes
-        for lbl, col in seg_map.items():
-            if lbl in ("Gender", "Credit rating") and col in dff.columns:
-                dff.loc[dff[col].astype(str).str.upper().str.strip() == "U", col] = pd.NA
-
-        # Date filter
-        if not dff["_DATE"].dropna().empty:
-            mind, maxd = pd.to_datetime(dff["_DATE"].dropna().min()), pd.to_datetime(dff["_DATE"].dropna().max())
-            c1, c2 = st.columns(2)
-            with c1:
-                start, end = st.date_input("Date range", (mind.date(), maxd.date()))
-            with c2:
-                include_undated = st.checkbox("Include no-date", value=True)
-            if not isinstance(start, tuple):
-                mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
-                if include_undated:
-                    mask = mask | dff["_DATE"].isna()
-                dff = dff[mask]
-
-        # SKU substring filter
-        sku_search = st.text_input("Most Recent SKU contains (optional)")
-        if msku_col and sku_search:
-            dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
-
-        # Include/exclude + value selections
-        selections = {}
-        include_flags = {}
-        if seg_cols:
-            st.markdown("**Attributes**")
-            cols = st.columns(3)
-            idx = 0
-            for label, col in seg_map.items():
-                with cols[idx % 3]:
-                    mode = st.selectbox(
-                        f"{label}: mode",
-                        options=["Include", "Do not include"],
-                        index=0,
-                        key=f"mode_{label}",
-                    )
-                    include_flags[col] = (mode == "Include")
-                    values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                    sel = st.multiselect(label, options=values, default=[], help="Empty = All")
-                    if sel:
-                        selections[col] = sel
-                idx += 1
-            # apply value filters
-            for col, vals in selections.items():
-                dff = dff[dff[col].isin(vals)]
-
-        st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
-
-    # --------------- GROUPING SETS query (distinct people) ---------------
-    include_cols = [c for c in seg_cols if include_flags.get(c, True)]
-    required_cols = [col for col, vals in selections.items() if len(vals) > 0 and include_flags.get(col, True)]
-
-    con = duckdb.connect()
-    con.register("t", dff)
-
-    attrs = [c for c in include_cols if c in dff.columns]
-    req_set = set(required_cols)
-
-    sets = []
-    for d in range(1, max_depth + 1):
-        for s in combinations(attrs, d):
-            if req_set.issubset(set(s)):
-                sets.append("(" + ",".join([f"\"{c}\"" for c in s]) + ")")
-
-    if not sets:
-        if required_cols:
-            sets.append("(" + ",".join([f"\"{c}\"" for c in required_cols]) + ")")
-        else:
-            sets.append("(" + ",".join([f"\"{c}\"" for c in attrs[:1]]) + ")")
-
-    grouping_sets_sql = ",\n".join(sets)
-
-    # Top SKUs by distinct buyers
-    top_skus = []
-    if msku_col and msku_col in dff.columns:
-        top_skus = con.execute(
-            f'SELECT "{msku_col}" AS sku, COUNT(DISTINCT "{email_col}") AS buyers '
-            f'FROM t WHERE _PURCHASE=1 AND "{msku_col}" IS NOT NULL AND TRIM("{msku_col}")<>\'\' '
-            f'GROUP BY 1 ORDER BY buyers DESC LIMIT 11'
-        ).fetchdf()["sku"].astype(str).tolist()
-
-    # Per-SKU distinct buyer counts (no 'SKU:' prefix)
-    pieces = []
-    for sku in top_skus:
-        s_escaped = sku.replace("'", "''")
-        pieces.append(
-            'COUNT(DISTINCT CASE WHEN "{msku}"=\'{sku}\' AND _PURCHASE=1 THEN "{email}" END) AS "{label}"'
-            .format(msku=msku_col, sku=s_escaped, email=email_col, label=sku)
-        )
-    sku_sums = ",\n  ".join(pieces)
-    sku_sql = ("\n  ," + sku_sums) if sku_sums else ""
-
-    # Depth expr (not displayed)
-    if attrs:
-        depth_terms = [f'CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END' for c in attrs]
-        depth_expr = " + ".join(depth_terms)
-    else:
-        depth_expr = "0"
-
-    attrs_sql = ", ".join([f'"{c}"' for c in attrs]) if attrs else "'All' AS overall"
-
-    # DISTINCT-based visitors/purchases & conversion
-    sql = f"""
-SELECT
-  {attrs_sql},
-  COUNT(DISTINCT "{email_col}") AS Visitors,
-  COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS Purchases,
-  100.0 * COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END)
-         / NULLIF(COUNT(DISTINCT "{email_col}"), 0) AS conv_rate,
-  ({depth_expr}) AS Depth{sku_sql}
-FROM t
-GROUP BY GROUPING SETS (
-  {grouping_sets_sql}
-)
-HAVING COUNT(DISTINCT "{email_col}") >= ?
+def find_attributes(df: pd.DataFrame):
     """
+    Identify known attribute columns by typical names.
+    Returns dict of {friendly_label: actual_col_name_if_present}.
+    """
+    attr_map = {
+        "Gender":        resolve(df, "Gender", "GENDER"),
+        "Age":           resolve(df, "Age_Range", "AGE_RANGE", "Age", "AGE"),
+        "Homeowner":     resolve(df, "Homeowner", "HOMEOWNER"),
+        "Married":       resolve(df, "Married", "MARRIED"),
+        "Children":      resolve(df, "Children", "CHILDREN"),
+        "Credit rating": resolve(df, "Credit_Rating", "CREDIT_RATING", "Credit", "CREDIT"),
+        "Income":        resolve(df, "Income_Range", "INCOME_RANGE", "Income", "INCOME"),
+        "Net worth":     resolve(df, "New_Worth", "NET_WORTH", "NETWORTH", "Net_Worth"),
+        "State":         resolve(df, "State", "PERSONAL_STATE", "STATE"),
+    }
+    return {k: v for k, v in attr_map.items() if v is not None}
 
-    # --------------- Run & sort ---------------
-    st.subheader("🏆 Ranked Conversion Table")
-    c1, c2 = st.columns(2)
-    with c1:
-        min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
-    with c2:
-        pass
+def fmt_int_series(s: pd.Series) -> pd.Series:
+    return s.apply(lambda v: "" if pd.isna(v) else f"{int(round(float(v))):,}")
 
-    res = con.execute(sql, [int(min_rows)]).fetchdf()
-    sort_key = {"Conversion %": "conv_rate", "Purchases": "Purchases", "Visitors": "Visitors"}[metric_choice]
-    res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
+def looks_like_percent_strings(s: pd.Series) -> bool:
+    # If it's object dtype and many values contain '%', assume already formatted.
+    if s.dtype == 'O':
+        sample = s.dropna().astype(str).head(50)
+        if len(sample) == 0:
+            return False
+        return (sample.str.contains('%').mean() > 0.6)
+    return False
 
-    # SKU columns in same order as top_skus
-    sku_cols = [c for c in top_skus if c in res.columns]
+if not uploaded:
+    st.info("Upload the precomputed CSV (the one you exported from Sheets) to begin.")
+    st.stop()
 
-    # --------------- Display ---------------
-    disp = res.copy()
-    disp.insert(0, "Rank", np.arange(1, len(disp) + 1))
-    disp = disp.rename(columns={"conv_rate": "Conversion"})
-    disp["Conversion"] = res["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
+# ---------------- Load CSV ----------------
+# Your export has metadata rows above the real header; we skip the first 3 rows.
+raw = pd.read_csv(uploaded, skiprows=3)
+# Clean up column names
+raw.columns = [str(c).strip() for c in raw.columns]
 
-    def _fmt_int(v):
-        try:
-            if v is None or (isinstance(v, float) and np.isnan(v)):
-                return ""
-            return f"{int(round(float(v))):,}"
-        except Exception:
-            return v
+# Drop fully-empty columns that sometimes show up as Unnamed
+df = raw.loc[:, ~raw.columns.str.match(r"^Unnamed:\s*\d+$")]
+# Also drop columns that are entirely NA
+df = df.dropna(axis=1, how="all")
 
-    for c in ["Visitors", "Purchases", "Depth"]:
-        if c in disp.columns:
-            disp[c] = disp[c].map(_fmt_int)
-    for sc in sku_cols:
-        disp[sc] = disp[sc].map(_fmt_int)
+# ---------------- Identify key columns ----------------
+col_rank       = resolve(df, "Rank")
+col_visitors   = resolve(df, "Visitors", "VISITORS")
+col_purchases  = resolve(df, "Purchasers", "Purchases", "BUYERS")
+col_conversion = resolve(df, "Conversion %", "Conversion", "CONVERSION %", "CONVERSION")
+col_depth      = resolve(df, "Depth")  # optional
 
-    # Attribute order -> actual CSV columns
-    logical_attr_order = ["Gender", "Age", "Homeowner", "Married", "Children", "Credit rating", "Income", "Net worth", "State"]
-    ordered_attr_cols = [seg_map[lbl] for lbl in logical_attr_order if lbl in seg_map and seg_map[lbl] in disp.columns]
+attr_map = find_attributes(df)
+attr_cols = [attr_map[k] for k in attr_map]
 
-    table_cols = ["Rank", "Visitors", "Purchases", "Conversion"] + ordered_attr_cols + sku_cols
+# SKU columns = numeric columns not in metrics/attributes/rank/depth
+reserved = set([c for c in [col_rank, col_visitors, col_purchases, col_conversion, col_depth] if c]) | set(attr_cols)
+sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numeric_dtype(df[c])]
 
-    # --------------- Render & Download ---------------
-    st.dataframe(disp[table_cols], use_container_width=True, hide_index=True)
+# ---------------- Filters ----------------
+with st.expander("🔎 Filters", expanded=True):
+    dff = df.copy()
 
-    csv_out = disp[table_cols]
-    st.download_button(
-        "Download ranked combinations (CSV)",
-        data=csv_out.to_csv(index=False).encode("utf-8"),
-        file_name="ranked_combinations.csv",
-        mime="text/csv",
+    # Treat 'U' as missing for these attributes (optional and safe)
+    for label in ["Gender", "Credit rating"]:
+        col = attr_map.get(label)
+        if col:
+            dff.loc[dff[col].astype(str).str.upper().str.strip() == "U", col] = pd.NA
+
+    # Value pickers for attributes
+    selections = {}
+    if attr_cols:
+        st.markdown("**Attributes**")
+        cols = st.columns(3)
+        for i, (label, col) in enumerate(attr_map.items()):
+            with cols[i % 3]:
+                vals = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+                pick = st.multiselect(label, options=vals, default=[], key=f"ms_{label}")
+                if pick:
+                    selections[col] = pick
+        # apply selections
+        for col, vals in selections.items():
+            dff = dff[dff[col].isin(vals)]
+
+    # Enforce min Visitors if present
+    if col_visitors:
+        # make sure visitors is numeric
+        dff[col_visitors] = pd.to_numeric(dff[col_visitors], errors="coerce")
+        dff = dff[dff[col_visitors] >= int(min_rows)]
+
+    st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
+
+# ---------------- Sorting & Ranking ----------------
+# If Conversion column missing, try to compute from purchases/visitors
+computed_conv_col = None
+if col_conversion is None and col_visitors and col_purchases:
+    computed_conv_col = "__conv"
+    dff[computed_conv_col] = 100.0 * pd.to_numeric(dff[col_purchases], errors="coerce") / \
+                             pd.to_numeric(dff[col_visitors], errors="coerce").replace(0, np.nan)
+    col_conversion = computed_conv_col
+
+# Choose sort column
+sort_map = {
+    "Conversion": col_conversion,
+    "Purchasers": col_purchases,
+    "Visitors": col_visitors,
+}
+sort_col = sort_map[metric_choice]
+if sort_col is None:
+    st.error(f"Missing column required to sort by '{metric_choice}'. Please include it in your CSV.")
+    st.stop()
+
+# Sort and cap Top N
+dff = dff.sort_values(sort_col, ascending=False, na_position="last").head(top_n).reset_index(drop=True)
+
+# Insert/refresh Rank as 1..N (even if CSV had a Rank, we show rank of current view)
+dff.insert(0, "Rank", np.arange(1, len(dff) + 1))
+
+# ---------------- Formatting ----------------
+# Visitors / Purchasers / Depth as nice ints (but preserve original columns)
+if col_visitors:
+    dff["Visitors_fmt"] = fmt_int_series(pd.to_numeric(dff[col_visitors], errors="coerce"))
+if col_purchases:
+    dff["Purchasers_fmt"] = fmt_int_series(pd.to_numeric(dff[col_purchases], errors="coerce"))
+if col_depth and col_depth in dff.columns:
+    dff["Depth_fmt"] = fmt_int_series(pd.to_numeric(dff[col_depth], errors="coerce"))
+
+# Conversion: if already a percent string column, keep; else format from numeric
+if col_conversion:
+    if looks_like_percent_strings(dff[col_conversion]):
+        dff["Conversion_fmt"] = dff[col_conversion].astype(str)
+    else:
+        dff["Conversion_fmt"] = pd.to_numeric(dff[col_conversion], errors="coerce").map(
+            lambda x: "" if pd.isna(x) else f"{x:.2f}%"
+        )
+else:
+    dff["Conversion_fmt"] = ""
+
+# Format SKU counts as ints
+for sc in sku_cols:
+    dff[sc] = fmt_int_series(pd.to_numeric(dff[sc], errors="coerce"))
+
+# ---------------- Column order for display/CSV ----------------
+# Attribute order (friendly label order; only include those present)
+attr_order_labels = ["Gender", "Age", "Homeowner", "Married", "Children",
+                     "Credit rating", "Income", "Net worth", "State"]
+ordered_attr_cols = [attr_map[lbl] for lbl in attr_order_labels if lbl in attr_map]
+
+# Build columns
+table_cols = ["Rank"]
+if col_visitors:   table_cols.append("Visitors_fmt")
+if col_purchases:  table_cols.append("Purchasers_fmt")
+table_cols.append("Conversion_fmt")
+table_cols += ordered_attr_cols
+table_cols += sku_cols
+if col_depth and "Depth_fmt" in dff.columns:
+    table_cols.append("Depth_fmt")
+
+# Friendly headers
+rename_map = {"Visitors_fmt": "Visitors", "Purchasers_fmt": "Purchasers",
+              "Conversion_fmt": "Conversion"}
+if "Depth_fmt" in table_cols:
+    rename_map["Depth_fmt"] = "Depth"
+
+disp = dff[table_cols].rename(columns=rename_map)
+
+# ---------------- Show & Download ----------------
+st.dataframe(disp, use_container_width=True, hide_index=True)
+st.download_button(
+    "Download ranked combinations (CSV)",
+    data=disp.to_csv(index=False).encode("utf-8"),
+    file_name="ranked_combinations_precomputed.csv",
+    mime="text/csv",
+)
+
     )
 
 else:
