@@ -320,8 +320,7 @@ if "Depth_fmt" in table_cols:
 
 disp = dff[table_cols].rename(columns=rename_map)
 
-# Style: hide "None"/"nan" by blending to bg; bold Conversion
-# ================ Display table (cleaned for None/nan) =================
+# ================ Display table with proper styling =================
 disp_view = disp.copy()
 
 # Replace None/nan with blanks
@@ -329,22 +328,34 @@ disp_view = disp_view.fillna("")
 disp_view = disp_view.replace("None", "", regex=True)
 disp_view = disp_view.replace("nan", "", regex=True)
 
-# Bold Conversion values
+# Styling functions
+def highlight_none(val):
+    s = str(val).strip().lower()
+    if s in ("none", "nan", ""):
+        return "color: white;"  # blends with white table cell background
+    return ""
+
+def bold_conversion(val):
+    if isinstance(val, str) and val.strip() != "":
+        return "font-weight: 700;"
+    return ""
+
+# Build Styler
+styler = disp_view.style.applymap(highlight_none)
 if "Conversion" in disp_view.columns:
-    disp_view["Conversion"] = disp_view["Conversion"].apply(
-        lambda x: f"**{x}**" if isinstance(x, str) and x.strip() != "" else ""
-    )
+    styler = styler.applymap(bold_conversion, subset=["Conversion"])
 
-# Show the cleaned table
-st.dataframe(disp_view, use_container_width=True, hide_index=True)
+# Show styled table
+st.dataframe(styler, use_container_width=True, hide_index=True)
 
-# CSV download still uses original disp (unmodified)
+# CSV download still uses the raw disp
 st.download_button(
     "Download ranked combinations (CSV)",
     data=disp.to_csv(index=False).encode("utf-8"),
     file_name="ranked_combinations_precomputed.csv",
     mime="text/csv"
 )
+
 
 
 # ================ Single-Attribute Summary Tables (unfiltered) =================
