@@ -365,3 +365,84 @@ st.download_button(
     file_name="ranked_combinations_precomputed.csv",
     mime="text/csv"
 )
+
+# ================= Attribute Summary Tables (single-attribute groups) =================
+
+def _is_blank(series: pd.Series) -> pd.Series:
+    """True if value is NA or empty/whitespace."""
+    return series.isna() | (series.astype(str).str.strip() == "")
+
+def _safe_number(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
+
+def _attr_singleton_table(dff: pd.DataFrame, attr_label: str, attr_col: str) -> pd.DataFrame:
+    """
+    From the filtered view (dff), return rows that represent groups where ONLY this attribute is present.
+    That means: attr_col is non-blank, and all other attribute columns are blank/NA.
+    Then aggregate by attr value (sum Visitors & Purchasers) and compute Conversion.
+    """
+    # Which columns are attributes in this dff right now?
+    active_attr_cols = [c for c in attr_cols if c in dff.columns]
+    other_cols = [c for c in active_attr_cols if c != attr_col]
+
+    # Keep only rows where this attribute has a value…
+    has_attr = ~_is_blank(dff[attr_col])
+    # …and all the other attributes are blank/NA
+    others_blank = pd.Series(True, index=dff.index)
+    for oc in other_cols:
+        others_blank &= _is_blank(dff[oc])
+
+    base = dff[has_attr & others_blank].copy()
+    if base.empty:
+        return pd.DataFrame(columns=[attr_label, "Visitors", "Purchasers", "Conversion"])
+
+    # Make sure we have numeric Visitors/Purchasers (fall back to original if *_fmt not present)
+    vis_col = col_visitors if col_visitors in base.columns else resolve(base, "Visitors")
+    pur_col = col_purchases if col_purchases in base.columns else resolve(base, "Purchasers")
+
+    base[vis_col] = _safe_number(base[vis_col])
+    base[pur_col] = _safe_number(base[pur_col])
+
+    agg = base.groupby(attr_col, dropna=False).agg(
+        Visitors=(vis_col, "sum"),
+        Purchasers=(pur_col, "sum")
+    ).reset_index()
+
+    # Compute conversion from sums
+    agg["Conversion"] = 100.0 * agg["Purchasers"] / agg["Visitors"].replace(0, np.nan)
+    # Pretty print ints and percent
+    agg["Visitors"] = agg["Visitors"].map(lambda x: "" if pd.isna(x) else f"{int(round(float(x))):,}")
+    agg["Purchasers"] = agg["Purchasers"].map(lambda x: "" if pd.isna(x) else f"{int(round(float(x))):,}")
+    agg["Conversion"] = agg["Conversion"].map(lambda x: "" if pd.isna(x) else f"{x:.2f}%")
+
+    # Rename the attribute column to a friendly label for display
+    agg = agg.rename(columns={attr_col: attr_label})
+    return agg
+
+st.markdown("### 🔎 Single-Attribute Summary Tables")
+
+# We will honor the "Do not include" toggles: skip any attribute the user excluded.
+excluded_labels = {lbl for lbl, flag in exclude_flags.items() if flag} if "exclude_flags" in locals() else set()
+
+# Order tables in the same friendly order you show in the main table
+summary_order = [
+    "Gender", "Age", "Homeowner", "Married", "Children",
+    "Credit rating", "Income", "Net worth", "State",
+    "Ethnicity (skiptrace)", "Department", "Seniority level", "Skiptrace credit"
+]
+
+for label in summary_order:
+    if label in excluded_labels:
+        continue
+    if label not in attr_map:
+        continue
+    col = attr_map[label]
+    if col not in dff.columns:
+        continue
+
+    tbl = _attr_singleton_table(dff, label, col)
+    st.markdown(f"**{label}**")
+    if tbl.empty:
+        st.caption("No single-attribute groups found for this attribute in the current filters.")
+    else:
+        st.dataframe(tbl, use_container_width=True, hide_index=True)
