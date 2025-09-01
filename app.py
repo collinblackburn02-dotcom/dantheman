@@ -25,7 +25,7 @@ st.title("Expanded Ranked Customer Dashboard")
 min_visitors = st.number_input(
     "Minimum number of visitors to show a group",
     min_value=0,
-    value=10,  # Changed to 10 for testing (since dataset has max 197 rows)
+    value=10,  # Set to 10 for testing (dataset has 197 rows)
     step=1
 )
 
@@ -103,8 +103,9 @@ else:
     # Filter to exclude rollup NULLs for attributes with specific values
     rollup_filter = []
     for col, vals in specific_values.items():
-        if vals:  # If specific values selected, ensure non-NULL in output
-            rollup_filter.append(f"{col} IN ({', '.join([f"'{v}'" for v in vals])})")
+        if vals:
+            vals_str = ", ".join([f"'{v}'" for v in vals])
+            rollup_filter.append(f"{col} IN ({vals_str})")
     
     rollup_filter_clause = " AND ".join(rollup_filter)
     if rollup_filter_clause:
@@ -118,18 +119,27 @@ else:
             Revenue
         FROM customers
         {where_clause}
+    ),
+    grouped AS (
+        SELECT 
+            {group_by_clause},
+            COUNT(*) AS visitors,
+            SUM(Purchase) AS purchases,
+            SUM(Revenue) AS total_revenue,
+            ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate
+        FROM cleaned
+        GROUP BY CUBE ({group_by_clause})
+        HAVING COUNT(*) >= {min_visitors}
     )
     SELECT 
         {select_clause},
-        COUNT(*) AS visitors,
-        SUM(Purchase) AS purchases,
-        SUM(Revenue) AS total_revenue,
-        ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate,
+        visitors,
+        purchases,
+        total_revenue,
+        conversion_rate,
         RANK() OVER (ORDER BY total_revenue DESC NULLS LAST) AS rank
-    FROM cleaned
+    FROM grouped
     {rollup_filter_clause}
-    GROUP BY CUBE ({group_by_clause})
-    HAVING COUNT(*) >= {min_visitors}
     ORDER BY total_revenue DESC NULLS LAST
     """
     
