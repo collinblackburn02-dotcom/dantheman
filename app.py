@@ -170,9 +170,6 @@ def looks_like_percent_strings(s: pd.Series) -> bool:
     return False
 
 # ================ Main: load CSV =================
-if not uploaded:
-    st.info("Upload the precomputed CSV (the one you exported from Sheets) to begin.")
-    st.stop()
 
 # Real header starts at row 4
 raw = pd.read_csv(uploaded, skiprows=3)
