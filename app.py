@@ -25,10 +25,7 @@ def resolve(df: pd.DataFrame, *candidates):
     return None
 
 def find_attributes(df: pd.DataFrame):
-    """
-    Identify known attribute columns by typical names.
-    Returns dict of {friendly_label: actual_col_name_if_present}.
-    """
+    """Identify known attribute columns by typical names."""
     attr_map = {
         "Gender":        resolve(df, "Gender", "GENDER"),
         "Age":           resolve(df, "Age_Range", "AGE_RANGE", "Age", "AGE"),
@@ -46,40 +43,37 @@ def fmt_int_series(s: pd.Series) -> pd.Series:
     return s.apply(lambda v: "" if pd.isna(v) else f"{int(round(float(v))):,}")
 
 def looks_like_percent_strings(s: pd.Series) -> bool:
-    # If it's object dtype and many values contain '%', assume already formatted.
-    if s.dtype == 'O':
+    if s.dtype == "O":
         sample = s.dropna().astype(str).head(50)
         if len(sample) == 0:
             return False
-        return (sample.str.contains('%').mean() > 0.6)
+        return (sample.str.contains("%").mean() > 0.6)
     return False
 
+# ---------------- Main ----------------
 if not uploaded:
     st.info("Upload the precomputed CSV (the one you exported from Sheets) to begin.")
     st.stop()
 
-# ---------------- Load CSV ----------------
-# Your export has metadata rows above the real header; we skip the first 3 rows.
+# Load CSV (skip first 3 rows for real header)
 raw = pd.read_csv(uploaded, skiprows=3)
-# Clean up column names
 raw.columns = [str(c).strip() for c in raw.columns]
 
-# Drop fully-empty columns that sometimes show up as Unnamed
+# Drop unnamed or all-empty columns
 df = raw.loc[:, ~raw.columns.str.match(r"^Unnamed:\s*\d+$")]
-# Also drop columns that are entirely NA
 df = df.dropna(axis=1, how="all")
 
-# ---------------- Identify key columns ----------------
+# Identify key columns
 col_rank       = resolve(df, "Rank")
 col_visitors   = resolve(df, "Visitors", "VISITORS")
 col_purchases  = resolve(df, "Purchasers", "Purchases", "BUYERS")
 col_conversion = resolve(df, "Conversion %", "Conversion", "CONVERSION %", "CONVERSION")
-col_depth      = resolve(df, "Depth")  # optional
+col_depth      = resolve(df, "Depth")
 
 attr_map = find_attributes(df)
 attr_cols = [attr_map[k] for k in attr_map]
 
-# SKU columns = numeric columns not in metrics/attributes/rank/depth
+# SKU columns = numeric columns not in metrics/attributes
 reserved = set([c for c in [col_rank, col_visitors, col_purchases, col_conversion, col_depth] if c]) | set(attr_cols)
 sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numeric_dtype(df[c])]
 
@@ -87,13 +81,11 @@ sku_cols = [c for c in df.columns if c not in reserved and pd.api.types.is_numer
 with st.expander("🔎 Filters", expanded=True):
     dff = df.copy()
 
-    # Treat 'U' as missing for these attributes (optional and safe)
     for label in ["Gender", "Credit rating"]:
         col = attr_map.get(label)
         if col:
             dff.loc[dff[col].astype(str).str.upper().str.strip() == "U", col] = pd.NA
 
-    # Value pickers for attributes
     selections = {}
     if attr_cols:
         st.markdown("**Attributes**")
@@ -104,20 +96,16 @@ with st.expander("🔎 Filters", expanded=True):
                 pick = st.multiselect(label, options=vals, default=[], key=f"ms_{label}")
                 if pick:
                     selections[col] = pick
-        # apply selections
         for col, vals in selections.items():
             dff = dff[dff[col].isin(vals)]
 
-    # Enforce min Visitors if present
     if col_visitors:
-        # make sure visitors is numeric
         dff[col_visitors] = pd.to_numeric(dff[col_visitors], errors="coerce")
         dff = dff[dff[col_visitors] >= int(min_rows)]
 
     st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
 
 # ---------------- Sorting & Ranking ----------------
-# If Conversion column missing, try to compute from purchases/visitors
 computed_conv_col = None
 if col_conversion is None and col_visitors and col_purchases:
     computed_conv_col = "__conv"
@@ -125,25 +113,16 @@ if col_conversion is None and col_visitors and col_purchases:
                              pd.to_numeric(dff[col_visitors], errors="coerce").replace(0, np.nan)
     col_conversion = computed_conv_col
 
-# Choose sort column
-sort_map = {
-    "Conversion": col_conversion,
-    "Purchasers": col_purchases,
-    "Visitors": col_visitors,
-}
+sort_map = {"Conversion": col_conversion, "Purchasers": col_purchases, "Visitors": col_visitors}
 sort_col = sort_map[metric_choice]
 if sort_col is None:
     st.error(f"Missing column required to sort by '{metric_choice}'. Please include it in your CSV.")
     st.stop()
 
-# Sort and cap Top N
 dff = dff.sort_values(sort_col, ascending=False, na_position="last").head(top_n).reset_index(drop=True)
-
-# Insert/refresh Rank as 1..N (even if CSV had a Rank, we show rank of current view)
 dff.insert(0, "Rank", np.arange(1, len(dff) + 1))
 
 # ---------------- Formatting ----------------
-# Visitors / Purchasers / Depth as nice ints (but preserve original columns)
 if col_visitors:
     dff["Visitors_fmt"] = fmt_int_series(pd.to_numeric(dff[col_visitors], errors="coerce"))
 if col_purchases:
@@ -151,7 +130,6 @@ if col_purchases:
 if col_depth and col_depth in dff.columns:
     dff["Depth_fmt"] = fmt_int_series(pd.to_numeric(dff[col_depth], errors="coerce"))
 
-# Conversion: if already a percent string column, keep; else format from numeric
 if col_conversion:
     if looks_like_percent_strings(dff[col_conversion]):
         dff["Conversion_fmt"] = dff[col_conversion].astype(str)
@@ -162,17 +140,14 @@ if col_conversion:
 else:
     dff["Conversion_fmt"] = ""
 
-# Format SKU counts as ints
 for sc in sku_cols:
     dff[sc] = fmt_int_series(pd.to_numeric(dff[sc], errors="coerce"))
 
-# ---------------- Column order for display/CSV ----------------
-# Attribute order (friendly label order; only include those present)
+# ---------------- Column order ----------------
 attr_order_labels = ["Gender", "Age", "Homeowner", "Married", "Children",
                      "Credit rating", "Income", "Net worth", "State"]
 ordered_attr_cols = [attr_map[lbl] for lbl in attr_order_labels if lbl in attr_map]
 
-# Build columns
 table_cols = ["Rank"]
 if col_visitors:   table_cols.append("Visitors_fmt")
 if col_purchases:  table_cols.append("Purchasers_fmt")
@@ -182,7 +157,6 @@ table_cols += sku_cols
 if col_depth and "Depth_fmt" in dff.columns:
     table_cols.append("Depth_fmt")
 
-# Friendly headers
 rename_map = {"Visitors_fmt": "Visitors", "Purchasers_fmt": "Purchasers",
               "Conversion_fmt": "Conversion"}
 if "Depth_fmt" in table_cols:
@@ -196,10 +170,5 @@ st.download_button(
     "Download ranked combinations (CSV)",
     data=disp.to_csv(index=False).encode("utf-8"),
     file_name="ranked_combinations_precomputed.csv",
-    mime="text/csv",
+    mime="text/csv"
 )
-
-    )
-
-else:
-    st.info("Upload the merged CSV to begin.")
