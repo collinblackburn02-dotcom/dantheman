@@ -97,12 +97,22 @@ else:
     # Construct final SELECT
     select_clause = ", ".join([f"COALESCE({col}, '') AS {col}" for col in selected_attributes])
     
-    # Determine GROUP BY type
-    # If all selected attributes have specific values, use regular GROUP BY
-    # Otherwise, use CUBE for attributes without specific values
-    cube_attrs = [col for col in selected_attributes if not specific_values[col]]
+    # Construct ANY_VALUE for grouped CTE
+    any_value_clause = ", ".join([f"ANY_VALUE({col}) AS {col}" for col in selected_attributes])
+    
+    # GROUP BY clause
     group_by_clause = ", ".join(selected_attributes)
-    group_by_type = "CUBE" if cube_attrs else "GROUP BY"
+    
+    # Filter to exclude rollup NULLs for attributes with specific values
+    rollup_filter = []
+    for col, vals in specific_values.items():
+        if vals:
+            vals_str = ", ".join([f"'{v}'" for v in vals])
+            rollup_filter.append(f"COALESCE({col}, '') IN ({vals_str})")
+    
+    rollup_filter_clause = " AND ".join(rollup_filter)
+    if rollup_filter_clause:
+        rollup_filter_clause = f"WHERE {rollup_filter_clause}"
     
     query = f"""
     WITH cleaned AS (
@@ -115,13 +125,13 @@ else:
     ),
     grouped AS (
         SELECT 
-            {group_by_clause},
+            {any_value_clause},
             COUNT(*) AS visitors,
             SUM(Purchase) AS purchases,
             SUM(Revenue) AS total_revenue,
             ROUND(SUM(Purchase) * 1.0 / COUNT(*), 2) AS conversion_rate
         FROM cleaned
-        {group_by_type} ({group_by_clause})
+        GROUP BY CUBE ({group_by_clause})
         HAVING COUNT(*) >= {min_visitors}
     )
     SELECT 
@@ -132,7 +142,7 @@ else:
         conversion_rate,
         RANK() OVER (ORDER BY total_revenue DESC NULLS LAST) AS rank
     FROM grouped
-    WHERE {' AND '.join([f"{col} IN ({', '.join([f"'{v}'" for v in vals])})" for col, vals in specific_values.items() if vals]) or 'TRUE'}
+    {rollup_filter_clause}
     ORDER BY total_revenue DESC NULLS LAST
     """
     
