@@ -112,6 +112,8 @@ if logo:
         st.markdown("<div style='padding-top:40px'></div>", unsafe_allow_html=True)
         st.image(logo, use_container_width=False)
 
+st.markdown('<div class="heavenly-section-title">Combined Conversion Ranking Table</div>', unsafe_allow_html=True)
+
 # ================ Sidebar (controls) =================
 with st.sidebar:
     st.markdown("### Controls")
