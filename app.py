@@ -40,10 +40,11 @@ def find_attributes(df: pd.DataFrame):
         "Income":               resolve(df, "Income_Range", "INCOME_RANGE", "Income", "INCOME"),
         "Net worth":            resolve(df, "New_Worth", "NET_WORTH", "NETWORTH", "Net_Worth"),
         "State":                resolve(df, "State", "PERSONAL_STATE", "STATE"),
-        # New selectors you asked for:
+        # Extra attributes
         "Ethnicity (skiptrace)": resolve(df, "SKIPTRACE_ETHNIC_CODE", "Skiptrace_Ethnic_Code"),
-        "Department":           resolve(df, "DEPARTMENT", "Department"),
-        "Seniority level":      resolve(df, "SENIORITY_LEVEL", "Seniority_Level", "Seniority"),
+        "Department":            resolve(df, "DEPARTMENT", "Department"),
+        "Seniority level":       resolve(df, "SENIORITY_LEVEL", "Seniority_Level", "Seniority"),
+        "Skiptrace credit":      resolve(df, "SKIPTRACE_CREDIT_RATING", "Skiptrace_Credit_Rating"),
     }
     return {k: v for k, v in attr_map.items() if v is not None}
 
@@ -181,7 +182,7 @@ for sc in sku_cols:
 attr_order_labels = [
     "Gender", "Age", "Homeowner", "Married", "Children",
     "Credit rating", "Income", "Net worth", "State",
-    "Ethnicity (skiptrace)", "Department", "Seniority level"
+    "Ethnicity (skiptrace)", "Department", "Seniority level", "Skiptrace credit"
 ]
 
 # Hide any attributes the user marked "Do not include"
