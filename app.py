@@ -321,26 +321,31 @@ if "Depth_fmt" in table_cols:
 disp = dff[table_cols].rename(columns=rename_map)
 
 # Style: hide "None"/"nan" by blending to bg; bold Conversion
-def style_hide_none(v):
-    s = str(v).strip().lower()
-    if s in ("none", "nan", ""):
-        return "color: #FFFFFF"
-    return ""
-def style_bold(v):
-    return "font-weight: 700" if str(v).strip() != "" else ""
+# ================ Display table (cleaned for None/nan) =================
+disp_view = disp.copy()
 
-styler = disp.style.applymap(style_hide_none)
-if "Conversion" in disp.columns:
-    styler = styler.applymap(style_bold, subset=["Conversion"])
+# Replace None/nan with blanks
+disp_view = disp_view.fillna("")
+disp_view = disp_view.replace("None", "", regex=True)
+disp_view = disp_view.replace("nan", "", regex=True)
 
-st.dataframe(styler, use_container_width=True, hide_index=True)
+# Bold Conversion values
+if "Conversion" in disp_view.columns:
+    disp_view["Conversion"] = disp_view["Conversion"].apply(
+        lambda x: f"**{x}**" if isinstance(x, str) and x.strip() != "" else ""
+    )
 
+# Show the cleaned table
+st.dataframe(disp_view, use_container_width=True, hide_index=True)
+
+# CSV download still uses original disp (unmodified)
 st.download_button(
     "Download ranked combinations (CSV)",
     data=disp.to_csv(index=False).encode("utf-8"),
     file_name="ranked_combinations_precomputed.csv",
     mime="text/csv"
 )
+
 
 # ================ Single-Attribute Summary Tables (unfiltered) =================
 # Build from ORIGINAL df (no interaction), depth-1 only, rank by Conversion desc.
