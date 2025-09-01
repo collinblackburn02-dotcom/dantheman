@@ -120,7 +120,12 @@ if sort_col is None:
     st.stop()
 
 dff = dff.sort_values(sort_col, ascending=False, na_position="last").head(top_n).reset_index(drop=True)
-dff.insert(0, "Rank", np.arange(1, len(dff) + 1))
+# Recompute Rank for the current sorted/filter view
+if "Rank" in dff.columns:
+    dff["Rank"] = np.arange(1, len(dff) + 1)
+else:
+    dff.insert(0, "Rank", np.arange(1, len(dff) + 1))
+
 
 # ---------------- Formatting ----------------
 if col_visitors:
