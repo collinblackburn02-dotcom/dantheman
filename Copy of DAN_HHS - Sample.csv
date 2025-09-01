@@ -1,0 +1,198 @@
+Age Range,Children,Gender,Home Owner,Married,New Worth,Income Range,Credit Rating,Purchase,Revenue,SKU,First Name,Last Name,State
+25-34,N,U,,,,,A,1,4300,FIR1,Jamey,Goss,TX
+25-34,Y,F,Y,Y,,"$75,000 to $99,999",A,1,5183.1,FIR2,Morgan,Powell,KS
+25-34,Y,F,Y,N,"-$2,499 to $2,499","$20,000 to $44,999",A,1,5662.54,FIR2,,,
+35-44,N,M,Y,Y,,,A,1,8200,RL2,Brian,Beer,
+35-44,Y,M,Y,,"$750,000 to $999,999","$250,000+",A,1,5742.2,FIR2,,,
+45-54,N,M,N,N,"-$20,000 to -$2,500","$20,000 to $44,999",A,1,5666.06,FIR2,,,
+45-54,Y,F,Y,Y,"$150,000 to $249,999","$75,000 to $99,999",A,1,2300,FIR2,,,
+55-64,Y,F,Y,Y,"$100,000 to $149,999","$150,000 to $199,999",A,1,5310,FIR2,,,
+45-54,Y,M,Y,Y,"$500,000 to $749,999","$60,000 to $74,999",A,1,4505,FIR1,,,
+45-54,Y,F,Y,N,,,A,1,8920.74,COM2,Cathy,Kooyman,
+55-64,Y,F,Y,N,"$250,000 to $374,999","$75,000 to $99,999",A,1,3224.5,RL2,Pamela,Pijanowski,OH
+55-64,Y,M,Y,Y,"$750,000 to $999,999","$100,000 to $149,999",A,1,6929.1,RL2,Joel,Thompson,MT
+35-44,Y,F,Y,N,"$2,500 to $24,999","$150,000 to $199,999",,1,6794.1,RL2,Stephanie,Gossman,OH
+35-44,,F,Y,Y,"-$2,499 to $2,499","$60,000 to $74,999",,1,4319.1,ECO,,,
+65 and older,Y,M,Y,Y,"$150,000 to $249,999","$200,000 to $249,000",,1,4913.1,FIR1,Francis,Crowley,OH
+35-44,Y,M,Y,N,"$250,000 to $374,999","$250,000+",,1,4410,ECO,,,
+,,,,,,,,1,5310,FIR2,Marka,Smith,IN
+65 and older,N,M,Y,Y,"$750,000 to $999,999","$75,000 to $99,999",,1,3400,ECO,,,
+35-44,Y,U,Y,Y,"-$2,499 to $2,499","$250,000+",,1,4319.1,ECO,,,
+45-54,Y,M,Y,N,"$100,000 to $149,999","$150,000 to $199,999",,1,2650,FIR2,Steve,Deam,IN
+65 and older,Y,M,Y,Y,"$150,000 to $249,999","$45,000 to $59,999",,1,27720,RL2,Robert,Fleece,OH
+35-44,Y,M,Y,Y,"-$2,499 to $2,499","$100,000 to $149,999",,1,5490,FIR2,,,
+55-64,Y,M,Y,Y,"$375,000 to $499,999","$60,000 to $74,999",,1,5082.5,FIR1,,,
+35-44,Y,M,Y,Y,"$150,000 to $249,999","$200,000 to $249,000",,1,6800,RL2,Michael,Wenzke,OH
+65 and older,Y,F,Y,Y,"$150,000 to $249,999","$75,000 to $99,999",,1,6550,RL2,,,
+35-44,Y,M,Y,Y,"$100,000 to $149,999","$75,000 to $99,999",,1,9900,FIR1,,,
+55-64,,M,,,"-$2,499 to $2,499",,,1,5850,FIR2,,,
+45-54,Y,M,Y,Y,"$375,000 to $499,999","$75,000 to $99,999",,1,8640,COM2,,,
+25-34,,F,Y,,"$750,000 to $999,999",,,1,6700,RL2,Megan,Sullivan,WI
+45-54,Y,M,Y,Y,"$1,000,000 or more",,,1,3750,ECO,,,
+65 and older,N,F,Y,N,"$100,000 to $149,999",,,1,4400,ECO,Janice,Marth,WI
+35-44,Y,M,Y,Y,"-$2,499 to $2,499","$150,000 to $199,999",,1,5850,FIR2,,,
+45-54,Y,M,Y,Y,"$500,000 to $749,999","$100,000 to $149,999",,1,5250,FIR2,,,
+35-44,,U,,N,"-$2,499 to $2,499",,,1,4800,FIR2,Jacalyn,Patnoe,CA
+,,,,,,,,1,3450,ECO,Courtney,Iuliano,MN
+35-44,,F,,,,"$20,000 to $44,999",,1,4500,ECO,,,
+55-64,,F,Y,N,"$50,000 to $74,999",,,1,7199,RL2,Cathy,Maychrzak,ND
+45-54,,F,Y,N,"$150,000 to $249,999","$20,000 to $44,999",,1,2099.5,FIR1,,,
+,,F,,,,"$250,000+",,1,2912.89,RL2,,,
+65 and older,Y,M,Y,N,"$500,000 to $749,999","$200,000 to $249,000",,1,7380,RL2,,,
+25-34,,M,,,,,,1,3800,ECO,,,
+55-64,,M,Y,Y,"$750,000 to $999,999","$100,000 to $149,999",,1,5250,FIR2,Rich,Hill,IL
+,,M,,,,,,1,5200,FIR2,Jim,Roche,IL
+45-54,,M,Y,N,"$375,000 to $499,999","$75,000 to $99,999",,1,4850,ECO,,,
+,,M,,,,,,1,6795,RL2,Justin,Albertson,IL
+35-44,N,M,Y,N,"$150,000 to $249,999","$75,000 to $99,999",,1,6615,RL2,Clifford,Romine,OK
+65 and older,Y,M,Y,Y,"$500,000 to $749,999","$200,000 to $249,000",,1,4300,FIR1,,,
+35-44,Y,M,Y,N,"-$2,499 to $2,499","$200,000 to $249,000",,1,3099.5,COM2,Nick,Eaker,MO
+,,,,,,,,1,6550,RL2,Nyree,Sanchez,WA
+,,M,,,,,,1,7400,RL2,,,
+25-34,Y,M,Y,Y,"-$2,499 to $2,499","$60,000 to $74,999",,1,6300,COM2,,,
+35-44,Y,M,Y,Y,"$100,000 to $149,999","$100,000 to $149,999",,1,3099.5,COM2,Jake,Soy,MD
+,,F,,,,,,1,5490,FIR2,Judy,Tammen,TX
+55-64,Y,M,Y,Y,"$750,000 to $999,999","$75,000 to $99,999",,1,5490,FIR2,,,
+55-64,,M,,,,,,1,6800,RL2,,,
+,,,,,,"$150,000 to $199,999",,1,10550,OUT2,,,
+,,,,,,,,1,8155,RL2,Kyle,Trimmer,TX
+55-64,Y,F,Y,Y,"$750,000 to $999,999",,,1,5109,FIR1,,,
+65 and older,,M,,N,"$100,000 to $149,999","$150,000 to $199,999",,1,4850,ECO,,,
+55-64,Y,M,Y,N,"$2,500 to $24,999","Less than $20,000",,1,5250,FIR2,,,
+35-44,Y,F,Y,N,"$375,000 to $499,999","$100,000 to $149,999",,1,6650,COM2,,,
+,N,U,Y,,,,,1,5490,FIR2,Francisco-Toma,Cantu-Rodriguez,
+35-44,Y,F,Y,N,"$250,000 to $374,999","$60,000 to $74,999",,1,5309,FIR2,,,
+65 and older,,M,,N,,"$100,000 to $149,999",,1,6300,COM2,,,
+65 and older,Y,M,Y,N,,,,1,4800,FIR1,Duncan,Allison,
+65 and older,N,M,Y,Y,,,,1,4250,FIR1,Jeffery,Braun,
+,,M,,,,"$75,000 to $99,999",,1,6434.54,FIR2,,,
+35-44,,M,,,,"$250,000+",,1,7191.65,COM2,Drew,Denerstein,MA
+,,M,,,,"$60,000 to $74,999",,1,9752.46,OUT2,Tom,Morell,CA
+65 and older,,F,,,,"$75,000 to $99,999",,1,8902.91,COM2,Tim,Richards,CO
+35-44,,M,N,,"$1,000,000 or more",,,1,7340.83,OUT2,Matt,Gwost,CO
+,,M,,,,"$75,000 to $99,999",,1,5174,RL2,,,
+45-54,Y,F,Y,N,"$25,000 to $49,999","$20,000 to $44,999",,1,4149,ECO,Whitney,Jacobs,IL
+35-44,,F,N,N,"$375,000 to $499,999","$150,000 to $199,999",,1,4750,FIR1,,,
+,,,,,,,,1,4850,FIR2,Danielb,Sullivan,UT
+35-44,,M,Y,N,,,,1,4650,COM2,Tho,Jones,UT
+55-64,Y,M,Y,Y,"$25,000 to $49,999","$45,000 to $59,999",,1,6929.1,RL2,,,
+,,M,,,"-$2,499 to $2,499",,,1,5490,FIR2,,,
+35-44,Y,U,N,Y,"-$2,499 to $2,499",,,1,6400,COM2,,,
+25-34,Y,M,Y,,"$375,000 to $499,999","$150,000 to $199,999",,1,6800,RL2,,,
+,,F,,,,,,1,360,RL500MID-W,,,
+65 and older,N,F,Y,N,,,,1,2205,RL1500MAX-W,Cynthia,Shepherd,
+,,,,,,"$100,000 to $149,999",,0,0,,Kristen,Stewart,NY
+25-34,Y,F,Y,N,"-$20,000 to -$2,500","$20,000 to $44,999",F,0,0,,Chelsea,Ogden,SC
+45-54,Y,F,Y,N,"$150,000 to $249,999","$60,000 to $74,999",,0,0,,Jeffery,Mizelle,NC
+65 and older,N,F,Y,N,,"$75,000 to $99,999",U,0,0,,Lori,Lacey,WI
+65 and older,N,F,Y,N,"$25,000 to $49,999","$20,000 to $44,999",A,0,0,,Mary,Pettay,AR
+,N,M,Y,,,,D,0,0,,Luis,Figueroa,
+55-64,Y,F,Y,N,"$2,500 to $24,999","$100,000 to $149,999",,0,0,,Lisa,Salcido,CA
+55-64,Y,F,Y,N,"$250,000 to $374,999","$75,000 to $99,999",D,0,0,,Renee,Blankenship,TN
+65 and older,Y,M,Y,Y,"$750,000 to $999,999","$100,000 to $149,999",B,0,0,,Edward,Goldstein,MD
+35-44,Y,F,Y,Y,"$100,000 to $149,999","$75,000 to $99,999",D,0,0,,Michelle,Hoskins,LA
+35-44,Y,M,Y,N,,"$60,000 to $74,999",B,0,0,,Peter,Hoff,AZ
+65 and older,N,F,Y,Y,,"$60,000 to $74,999",U,0,0,,Joann,Brewer,GA
+55-64,Y,F,Y,Y,"$750,000 to $999,999","$250,000+",B,0,0,,Karen,Rogers,CA
+35-44,,M,,,,"$60,000 to $74,999",,0,0,,Daniel,Diaz,NY
+65 and older,N,M,Y,N,"$750,000 to $999,999","$60,000 to $74,999",C,0,0,,Christopher,Laird,PA
+35-44,Y,M,Y,N,,,D,0,0,,Timothy,Savage,
+35-44,Y,M,Y,N,"$1,000,000 or more","$45,000 to $59,999",,0,0,,Larry,Iii,IN
+35-44,Y,M,Y,N,"$1,000,000 or more","$250,000+",A,0,0,,Robert,Schepis,NY
+65 and older,,M,Y,Y,"$1,000,000 or more",,,0,0,,Lawrence,Jr,VA
+35-44,,F,Y,N,"$375,000 to $499,999","$75,000 to $99,999",A,0,0,,Karina,Bonin,OR
+25-34,,F,N,N,"$375,000 to $499,999","$20,000 to $44,999",,0,0,,Robert,Covert,CA
+65 and older,Y,F,Y,N,"-$2,499 to $2,499","$75,000 to $99,999",,0,0,,Danielle,Driscoll,OH
+45-54,Y,M,Y,N,"$500,000 to $749,999","$100,000 to $149,999",,0,0,,Ned,O'neill,MA
+45-54,Y,F,Y,Y,"$150,000 to $249,999","$45,000 to $59,999",C,0,0,,Brandy,Wade,VA
+,,,,,,,,0,0,,Henry,Aurdahl,NY
+35-44,Y,M,N,N,"-$20,000 to -$2,500","$100,000 to $149,999",,0,0,,Robert,Teem,AL
+65 and older,Y,M,Y,Y,"$375,000 to $499,999","$100,000 to $149,999",G,0,0,,Michael,Sargent,TX
+65 and older,Y,F,Y,Y,"$375,000 to $499,999","$45,000 to $59,999",D,0,0,,Geraldine,Tijmes,TX
+55-64,Y,M,Y,N,"$50,000 to $74,999","$45,000 to $59,999",E,0,0,,Basil,Richards,OH
+,,,,,,,C,0,0,,Tzong,Chen,CT
+65 and older,,M,Y,Y,"$750,000 to $999,999","$250,000+",B,0,0,,Victoria,Sanford,CA
+,,M,,,,,,0,0,,Brian,Wade,CA
+65 and older,,M,,N,"$750,000 to $999,999",,,0,0,,James,Gompf,KY
+55-64,Y,M,Y,Y,"-$2,499 to $2,499","$75,000 to $99,999",B,0,0,,Brandon,Tomlin,PA
+,,,,,,,B,0,0,,Brooke,Luallen,CA
+55-64,Y,M,Y,Y,"$750,000 to $999,999","$150,000 to $199,999",D,0,0,,Carl,Ehmann,CO
+25-34,Y,F,Y,Y,"$2,500 to $24,999","$20,000 to $44,999",D,0,0,,Sherry,Griffin,CA
+25-34,Y,F,Y,Y,"$25,000 to $49,999","$60,000 to $74,999",,0,0,,Claudia,Mendoza,AZ
+65 and older,Y,M,Y,Y,"$1,000,000 or more","$60,000 to $74,999",,0,0,,Todd,Christopher,CA
+55-64,Y,M,Y,Y,"$250,000 to $374,999","$150,000 to $199,999",U,0,0,,Richard,Jessop,VA
+25-34,Y,M,Y,,"$500,000 to $749,999","$20,000 to $44,999",,0,0,,Reuben,Ulanimo,CA
+25-34,Y,F,Y,,"$150,000 to $249,999","$100,000 to $149,999",,0,0,,Celeste,Curiel,TX
+45-54,,U,Y,N,"$1,000,000 or more","$60,000 to $74,999",,0,0,,Chris,Perkins,TX
+25-34,Y,M,Y,N,"$150,000 to $249,999","$100,000 to $149,999",,0,0,,Alan,Mitchell,NC
+65 and older,Y,U,Y,N,"$150,000 to $249,999","$100,000 to $149,999",A,0,0,,Mary,Fitzgerald,NJ
+65 and older,N,F,Y,N,,"Less than $20,000",D,0,0,,Mary,Wilfahrt,MN
+,,F,,,,"$75,000 to $99,999",F,0,0,,Aaliyah,Garcia,CA
+65 and older,Y,M,Y,N,"$375,000 to $499,999","$150,000 to $199,999",,0,0,,William,Owen,PA
+25-34,,F,,,,,F,0,0,,Brianna,Shepherd,CA
+25-34,Y,M,Y,Y,"$100,000 to $149,999","$60,000 to $74,999",D,0,0,,Pablo,Garcia,WA
+,,M,,,,,A,0,0,,Brian,Matsumoto,CA
+65 and older,,F,Y,N,"$750,000 to $999,999","$250,000+",,0,0,,James,Steele,CA
+25-34,Y,F,,N,"$25,000 to $49,999",,F,0,0,,Kiara,Thompson,NY
+25-34,Y,M,Y,,"$500,000 to $749,999","$250,000+",B,0,0,,George,Bazos,NY
+45-54,,F,,,,"$60,000 to $74,999",,0,0,,Lisa,Huertas,FL
+55-64,Y,M,Y,Y,,,C,0,0,,Tim,Crofts,
+,,,,,,,,0,0,,Sally,Obermeder,NSW
+45-54,,U,,,,,,0,0,,Dernecia,Adams,GA
+65 and older,Y,M,Y,Y,"$750,000 to $999,999","$150,000 to $199,999",D,0,0,,Stephen,Morrison,FL
+,,M,,,,,,0,0,,Raj,Kochar,FL
+65 and older,,M,,,,"$60,000 to $74,999",,0,0,,Chip,Beddis,VA
+55-64,Y,F,Y,Y,"$150,000 to $249,999","$100,000 to $149,999",,0,0,,Colette,Schaelling,UT
+45-54,Y,F,Y,N,"$50,000 to $74,999","$20,000 to $44,999",A,0,0,,Michelle,Alto,NY
+45-54,Y,F,Y,Y,"$500,000 to $749,999","$150,000 to $199,999",C,0,0,,MaryAnn,Edzards,NY
+55-64,N,M,Y,N,,,D,0,0,,Miguel,Gutierrez,
+35-44,Y,F,Y,N,"$750,000 to $999,999","$45,000 to $59,999",C,0,0,,Frances,Bernal,CA
+55-64,Y,F,Y,N,"$75,000 to $99,999","$60,000 to $74,999",C,0,0,,Lisa,Schmidt,KS
+25-34,Y,F,Y,N,"$100,000 to $149,999","$45,000 to $59,999",D,0,0,,Katie,Pappy,FL
+65 and older,Y,F,Y,Y,"$750,000 to $999,999","$100,000 to $149,999",D,0,0,,Judith,Krodel,FL
+65 and older,Y,M,Y,Y,"$1,000,000 or more","$75,000 to $99,999",,0,0,,Victor,Labinsky,TX
+35-44,Y,F,Y,Y,"$100,000 to $149,999","$75,000 to $99,999",B,0,0,,Brittany,Newberry,TX
+55-64,,M,Y,N,"$150,000 to $249,999","$20,000 to $44,999",C,0,0,,Oscar,Esquivel,TX
+,,,,,,,,0,0,,Shahrad,N,CA
+45-54,,M,,Y,,,,0,0,,Trevor,Alsop,CA
+55-64,Y,M,Y,N,"$100,000 to $149,999","$100,000 to $149,999",B,0,0,,Matthew,Matyuf,VA
+,,,,,,,,0,0,,Amanda,Tims,OK
+55-64,Y,M,Y,Y,"$25,000 to $49,999","$60,000 to $74,999",,0,0,,Cory,Simpson,MO
+25-34,Y,F,Y,N,,"$20,000 to $44,999",C,0,0,,Caroline,Nava,FL
+,,F,,N,"$500,000 to $749,999",,,0,0,,Mariana,Lazo,CO
+,,,,,,,C,0,0,,Kayla,Emberson,WI
+25-34,Y,M,Y,N,"$150,000 to $249,999","$75,000 to $99,999",,0,0,,Gary,Fischer,FL
+65 and older,N,F,Y,N,,,C,0,0,,Joellen,Werne,
+45-54,Y,F,Y,N,"$25,000 to $49,999","$20,000 to $44,999",,0,0,,Mirta,Arroyo,FL
+25-34,,F,,,,"Less than $20,000",,0,0,,Ja,Buchanana,TX
+,,,,,,,,0,0,,Gerald,Robinson,
+25-34,Y,F,Y,N,"$75,000 to $99,999","$100,000 to $149,999",F,0,0,,Raegan,Banks,TX
+45-54,N,F,Y,Y,"-$2,499 to $2,499","$75,000 to $99,999",C,0,0,,Amber,Ladd,CA
+,,F,,,"$1,000,000 or more","$60,000 to $74,999",,0,0,,Nancy,Gores,OH
+35-44,,M,,,,,,0,0,,Michael,Piechota,CA
+,,F,,,,"$100,000 to $149,999",,0,0,,Sheena,Clark,MN
+45-54,,F,,N,"-$2,499 to $2,499",,U,0,0,,Cade,Walsh,IN
+55-64,Y,F,Y,N,"$375,000 to $499,999","$45,000 to $59,999",C,0,0,,Linda,White,VT
+65 and older,N,F,Y,Y,"$750,000 to $999,999","$250,000+",B,0,0,,Yvonne,Donahue,CA
+35-44,Y,M,N,N,"-$2,499 to $2,499","$45,000 to $59,999",,0,0,,Dave,Taylor,PA
+55-64,N,F,Y,N,"$375,000 to $499,999","$100,000 to $149,999",B,0,0,,Susan,Vavak,CA
+55-64,,F,,N,,"$20,000 to $44,999",,0,0,,Melissa,Blanton,TX
+25-34,Y,F,Y,N,"$2,500 to $24,999","$45,000 to $59,999",D,0,0,,Brenda,Gomez,TX
+55-64,Y,F,Y,N,"$75,000 to $99,999",,,0,0,,Barbara,Mitchem,GA
+35-44,Y,F,N,N,"$1,000,000 or more","$60,000 to $74,999",,0,0,,Dub,Dale,TX
+35-44,Y,F,Y,N,"-$2,499 to $2,499","Less than $20,000",E,0,0,,Kimberly,Sims,IL
+,,F,,,"$1,000,000 or more",,,0,0,,Renée,A,CA
+45-54,N,M,Y,N,"$150,000 to $249,999","$60,000 to $74,999",E,0,0,,Michael,Young,IL
+35-44,Y,U,Y,N,"$375,000 to $499,999","$45,000 to $59,999",U,0,0,,Tyler,Wyant,FL
+45-54,Y,M,Y,Y,"$75,000 to $99,999","$75,000 to $99,999",E,0,0,,Harold,Heitmuller,MA
+45-54,,F,,N,"$150,000 to $249,999","Less than $20,000",,0,0,,Alyssa,Vanwie,NY
+55-64,Y,M,Y,Y,"$150,000 to $249,999","$100,000 to $149,999",,0,0,,Kevon,Duey,OH
+,,U,,,"-$2,499 to $2,499","$75,000 to $99,999",,0,0,,Vidya,Kaushik,NY
+55-64,,F,Y,N,"$750,000 to $999,999","$100,000 to $149,999",,0,0,,Laura,Schriner,NV
+65 and older,Y,F,Y,Y,"$100,000 to $149,999",,,0,0,,Brittany,Bjornerud,NY
+18-24,Y,F,Y,N,"-$20,000 to -$2,500","$75,000 to $99,999",B,0,0,,Heidi,Lawrence,TX
+45-54,,M,,,"$1,000,000 or more","$150,000 to $199,999",,0,0,,Wes,Jones,AL
+45-54,Y,M,Y,Y,"-$2,499 to $2,499","$75,000 to $99,999",,0,0,,Dan,Galasso,CO
+65 and older,N,F,Y,Y,"-$20,000 to -$2,500","$75,000 to $99,999",B,0,0,,Judith,Hylen,MI
+,,F,,,,"$45,000 to $59,999",,0,0,,Rachel,Gensler,FL
+45-54,Y,F,Y,N,"$150,000 to $249,999","$75,000 to $99,999",,0,0,,Julie,Gonzalez,AL
