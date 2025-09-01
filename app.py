@@ -1,13 +1,156 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
+# ================= Branding =================
+# Brand colors
+BRAND = {
+    "bg": "#F5F0E6",       # beige
+    "fg": "#3A2A26",       # deep brown text
+    "accent": "#6E4F3A",   # medium brown
+    "accent2": "#A07A5A",  # lighter brown
+    "card": "#FFF9F0",     # light card beige
+    "white": "#FFFFFF",
+}
+
+# Try to find a logo automatically
+LOGO_CANDIDATES = ["logo.png", "heavenly_logo.png", "assets/logo.png", "assets/heavenly_logo.png"]
+
+def find_logo():
+    base = Path.cwd()
+    for name in LOGO_CANDIDATES:
+        p = base / name
+        if p.exists():
+            return str(p)
+    return None
+
+def inject_css():
+    st.markdown(
+        f"""
+        <style>
+            :root {{
+                --bg: {BRAND["bg"]};
+                --fg: {BRAND["fg"]};
+                --accent: {BRAND["accent"]};
+                --accent2: {BRAND["accent2"]};
+                --card: {BRAND["card"]};
+                --white: {BRAND["white"]};
+            }}
+            /* App background & global text */
+            .stApp {{
+                background: var(--bg);
+                color: var(--fg);
+            }}
+            /* Main title & caption */
+            .heavenly-title {{
+                font-weight: 800;
+                letter-spacing: 0.3px;
+                color: var(--fg);
+                margin: 0 0 .25rem 0;
+            }}
+            .heavenly-caption {{
+                color: rgba(58,42,38,0.85);
+                font-size: 0.95rem;
+                margin-bottom: 1.25rem;
+            }}
+
+            /* Card look for containers */
+            .block-container {{
+                padding-top: 1.2rem;
+            }}
+            .stExpander, .stDataFrame, .stMarkdown, .stDownloadButton {{
+                background: var(--card);
+                border-radius: 14px;
+            }}
+
+            /* Sidebar */
+            section[data-testid="stSidebar"] {{
+                background: linear-gradient(180deg, var(--card), var(--bg));
+                color: var(--fg);
+                border-right: 1px solid rgba(58,42,38,0.08);
+            }}
+            /* Sidebar titles */
+            section[data-testid="stSidebar"] .stMarkdown p {{
+                color: var(--fg);
+                font-weight: 700;
+            }}
+
+            /* Inputs */
+            .stSlider > div > div > div > div {{
+                background: var(--accent) !important;
+            }}
+            .stSlider [data-baseweb="slider"] > div:first-child {{
+                background: rgba(110,79,58,0.25) !important;
+            }}
+            .stNumberInput input, .stTextInput input {{
+                background: var(--white);
+                color: var(--fg);
+                border: 1px solid rgba(110,79,58,0.25);
+                border-radius: 10px;
+            }}
+            /* Multiselect chips */
+            div[data-baseweb="tag"] {{
+                background: rgba(110,79,58,0.15);
+                color: var(--fg);
+            }}
+
+            /* Radio/Select styling */
+            .stRadio label, .stSelectbox label {{
+                color: var(--fg) !important;
+                font-weight: 600;
+            }}
+
+            /* Buttons */
+            .stDownloadButton button, .stButton button {{
+                background: var(--accent) !important;
+                color: var(--white) !important;
+                border-radius: 12px !important;
+                border: 1px solid rgba(58,42,38,0.15) !important;
+                box-shadow: 0 2px 12px rgba(58,42,38,0.12);
+            }}
+            .stDownloadButton button:hover, .stButton button:hover {{
+                background: var(--accent2) !important;
+            }}
+
+            /* Expander header */
+            details > summary {{
+                background: var(--card);
+                border-radius: 12px;
+                padding: .6rem .9rem;
+                border: 1px solid rgba(58,42,38,0.08);
+                color: var(--fg);
+                font-weight: 700;
+            }}
+
+            /* Dataframe tweaks */
+            div[data-testid="stDataFrame"] {{
+                border: 1px solid rgba(58,42,38,0.08);
+                box-shadow: 0 2px 16px rgba(58,42,38,0.08);
+                border-radius: 12px;
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# ================= App Meta =================
 st.set_page_config(page_title="Ranked Customer Dashboard — Precomputed CSV", layout="wide")
-st.title("📊 Ranked Customer Dashboard (Precomputed CSV)")
-st.caption("Loads your Sheets export (skip first 3 rows), then filters, ranks, and displays. No recomputation.")
+inject_css()
+
+# Header with logo
+logo_path = find_logo()
+col_logo, col_title = st.columns([1, 6], vertical_alignment="center")
+with col_logo:
+    if logo_path:
+        st.image(logo_path, use_container_width=True)
+with col_title:
+    st.markdown('<h1 class="heavenly-title">Heavenly Health / Heavenly Heat — Ranked Customer Dashboard</h1>', unsafe_allow_html=True)
+    st.markdown('<div class="heavenly-caption">Loads your Sheets export (skip first 3 rows), then filters, ranks, and displays. No recomputation.</div>', unsafe_allow_html=True)
 
 # ---------------- Sidebar ----------------
 with st.sidebar:
+    st.markdown("### Controls")
     uploaded = st.file_uploader("Upload precomputed CSV", type=["csv"])
     st.markdown("---")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
@@ -76,7 +219,11 @@ df = df.dropna(axis=1, how="all")
 col_rank       = resolve(df, "Rank")
 col_visitors   = resolve(df, "Visitors", "VISITORS")
 col_purchases  = resolve(df, "Purchasers", "Purchases", "BUYERS")
-col_conversion = resolve(df, "Conversion %", "Conversion", "CONVERSION %", "CONVERSION")
+col_conversion = resolve(
+    df,
+    "Conversion %", "Conversion", "CONVERSION %", "CONVERSION",
+    "Conversion%", "conversion%", "Conv", "CVR", "conversion_rate", "Conversion Rate"
+)
 col_depth      = resolve(df, "Depth")
 
 attr_map = find_attributes(df)
@@ -211,6 +358,7 @@ disp = dff[table_cols].rename(columns=rename_map)
 
 # ---------------- Show & Download ----------------
 st.dataframe(disp, use_container_width=True, hide_index=True)
+
 st.download_button(
     "Download ranked combinations (CSV)",
     data=disp.to_csv(index=False).encode("utf-8"),
