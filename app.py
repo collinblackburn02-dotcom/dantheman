@@ -109,7 +109,7 @@ logo = find_logo_path()
 if logo:
     c_left, c_mid, c_right = st.columns([1, 2, 1])
     with c_mid:
-        st.markdown("<div style='padding-top:25px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='padding-top:40px'></div>", unsafe_allow_html=True)
         st.image(logo, use_container_width=False)
 
 # ================ Sidebar (controls) =================
