@@ -1,140 +1,242 @@
-import duckdb
 import streamlit as st
 import pandas as pd
-import os
+import numpy as np
+import duckdb
+from utils import resolve_col
 from itertools import combinations
 
-# Cache the combo analysis
-@st.cache_data
-def compute_combo_conversions(df, selected_attributes, specific_values, min_visitors=50):
-    # Filter data based on specific values
-    df_filtered = df.copy()
-    for col, vals in specific_values.items():
-        if vals and col in df_filtered.columns:
-            df_filtered = df_filtered[df_filtered[column_mapping[col]].isin(vals)]
-    
-    # Generate all combinations (1 to 5 attributes)
-    max_combo_size = 5
-    combos = []
-    for k in range(1, min(max_combo_size, len(selected_attributes)) + 1):
-        combos.extend(list(combinations(selected_attributes, k)))
-    
-    # Collect results
-    results = []
-    for combo in combos:
-        # Ensure all combo columns exist
-        valid_combo = all(col in df_filtered.columns for col in combo)
-        if not valid_combo:
-            continue
-        
-        # Group by combo and calculate metrics
-        mapped_combo = [column_mapping[col] for col in combo]
-        group_df = df_filtered.groupby(mapped_combo).agg({
-            'Purchase': ['sum', 'count'],
-            'Revenue': 'sum'
-        }).reset_index()
-        group_df.columns = mapped_combo + ['purchases', 'visitors', 'total_revenue']
-        # Exclude groups with blanks in combo attributes
-        mask = group_df[mapped_combo].notna().all(axis=1) & (group_df[mapped_combo] != '').all(axis=1)
-        group_df = group_df[mask]
-        # Calculate conversion rate
-        group_df['conversion_rate'] = group_df['purchases'] / group_df['visitors']
-        group_df['combo_size'] = len(combo)
-        # Filter by min visitors
-        group_df = group_df[group_df['visitors'] >= min_visitors]
-        # Rename back to UI attribute names
-        group_df.columns = combo + ['purchases', 'visitors', 'total_revenue', 'conversion_rate', 'combo_size']
-        if not group_df.empty:
-            results.append(group_df)
-    
-    # Combine all results
-    if results:
-        all_results = pd.concat(results, ignore_index=True)
-        # Ensure non-selected attributes are blank
-        for attr in ['Gender', 'Age_Range', 'Home_Owner', 'Net_Worth', 'Income_Range', 'State', 'Credit_Rating']:
-            if attr not in selected_attributes:
-                all_results[attr] = ''
-        return all_results
-    return pd.DataFrame()
+st.set_page_config(page_title="Ranked Customer Dashboard — DuckDB", layout="wide")
+st.title("📊 Ranked Customer Dashboard (Fast • DuckDB)")
+st.caption("Counts each person in every qualifying group (1..Max depth). Uses GROUPING SETS. SKU columns come from Most Recent SKU only.")
 
-# Debug: Print current directory and files
-st.write("Current working directory:", os.getcwd())
-st.write("Files in directory:", os.listdir())
+# ---------------- Sidebar ----------------
+with st.sidebar:
+    uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
+    st.markdown('---')
+    metric_choice = st.radio("Sort metric", ["Conversion %","Purchases","Visitors"], index=0)
+    max_depth = st.slider('Max combo depth', 1, 4, 2, 1)
+    top_n = st.slider('Top N', 10, 1000, 50, 10)
 
-# Load your CSV (replace with your actual file path, e.g., 'data/Copy of DAN_HHS - Sample.csv')
-try:
-    df = pd.read_csv('Copy of DAN_HHS - Sample.csv')
-    st.write("CSV loaded successfully with", len(df), "rows.")
-    st.write("CSV columns:", df.columns.tolist())  # Debug: Show column names
-except FileNotFoundError:
-    st.error("CSV file 'Copy of DAN_HHS - Sample.csv' not found! Please check the file path or upload the file to the app directory.")
-    st.stop()
+@st.cache_data(show_spinner=False)
+def load_df(file):
+    df = pd.read_csv(file)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
 
-# Streamlit UI
-st.title("Ranked Customer Dashboard")
+def to_datetime_series(s: pd.Series) -> pd.Series:
+    try:
+        return pd.to_datetime(s, errors='coerce')
+    except Exception:
+        # same length/shape fallback
+        return pd.to_datetime(pd.Series([None]*len(s)))
 
-# Minimum visitors input
-min_visitors = st.number_input(
-    "Minimum number of visitors to show a group",
-    min_value=0,
-    value=50,
-    step=1,
-    help="Minimum visitors for analysis (cached). Your dataset has 197 rows."
+if uploaded:
+    # --------------- Load & resolve columns ---------------
+    df = load_df(uploaded)
+    email_col   = resolve_col(df, 'EMAIL')
+    purchase_col= resolve_col(df, 'PURCHASE')
+    date_col    = resolve_col(df, 'DATE')
+    msku_col    = resolve_col(df, 'MOST_RECENT_SKU')
+    state_col   = resolve_col(df, 'PERSONAL_STATE')  # State attribute
+    if email_col is None or purchase_col is None:
+        st.error('Missing EMAIL or PURCHASE column.')
+        st.stop()
+
+    # Purchase -> 0/1
+    s = df[purchase_col]
+    if pd.api.types.is_numeric_dtype(s):
+        df['_PURCHASE'] = (s.fillna(0) > 0).astype(int)
+    else:
+        vals = s.astype(str).str.strip().str.lower()
+        yes = {'1','true','t','yes','y','buyer','purchased'}
+        df['_PURCHASE'] = vals.isin(yes).astype(int)
+
+    # Date for filtering (optional)
+    df['_DATE'] = to_datetime_series(df[date_col]) if date_col else pd.NaT
+
+    # --------------- Attribute map (use friendly display labels, resolve to actual CSV columns) ---------------
+    seg_map = {
+        'Age':           resolve_col(df, 'AGE_RANGE'),
+        'Income':        resolve_col(df, 'INCOME_RANGE'),
+        'Net worth':     resolve_col(df, 'NET_WORTH'),
+        'Credit rating': resolve_col(df, 'CREDIT_RATING'),
+        'Gender':        resolve_col(df, 'GENDER'),
+        'Homeowner':     resolve_col(df, 'HOMEOWNER'),
+        'Married':       resolve_col(df, 'MARRIED'),
+        'Children':      resolve_col(df, 'CHILDREN'),
+        'State':         state_col,
+    }
+    # Drop missing
+    seg_map = {lbl: col for lbl, col in seg_map.items() if col is not None}
+    seg_cols = list(seg_map.values())
+
+    # --------------- Filters ---------------
+    with st.expander('🔎 Filters', expanded=True):
+        dff = df.copy()
+
+        # Treat 'U' as missing for these attributes (if present)
+        for lbl, col in seg_map.items():
+            if lbl in ('Gender', 'Credit rating') and col in dff.columns:
+                dff.loc[dff[col].astype(str).str.upper().str.strip() == 'U', col] = pd.NA
+
+        # Date range filter
+        if not dff['_DATE'].dropna().empty:
+            mind, maxd = pd.to_datetime(dff['_DATE'].dropna().min()), pd.to_datetime(dff['_DATE'].dropna().max())
+            c1,c2 = st.columns(2)
+            with c1:
+                start, end = st.date_input('Date range', (mind.date(), maxd.date()))
+            with c2:
+                include_undated = st.checkbox('Include no-date', value=True)
+            if not isinstance(start, tuple):
+                mask = dff['_DATE'].between(pd.to_datetime(start), pd.to_datetime(end))
+                if include_undated:
+                    mask = mask | dff['_DATE'].isna()
+                dff = dff[mask]
+
+        # SKU contains substring
+        sku_search = st.text_input('Most Recent SKU contains (optional)')
+        if msku_col and sku_search:
+            dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
+
+        # Include/exclude + value selections
+        selections = {}
+        include_flags = {}
+        if seg_cols:
+            st.markdown('**Attributes**')
+            cols = st.columns(3)
+            idx = 0
+            for label, col in seg_map.items():
+                with cols[idx % 3]:
+                    mode = st.selectbox(f'{label}: mode', options=['Include', 'Do not include'], index=0, key=f'mode_{label}')
+                    include_flags[col] = (mode == 'Include')
+                    # Show values as they appear in your CSV
+                    values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
+                    sel = st.multiselect(label, options=values, default=[], help='Empty = All')
+                    if sel:
+                        selections[col] = sel
+                idx += 1
+            # apply value filters
+            for col, vals in selections.items():
+                dff = dff[dff[col].isin(vals)]
+
+        st.caption(f'Rows after filters: **{len(dff):,}** / {len(df):,}')
+
+    # --------------- Build GROUPING SETS query ---------------
+    include_cols = [c for c in seg_cols if include_flags.get(c, True)]
+    required_cols = [col for col, vals in selections.items() if len(vals) > 0 and include_flags.get(col, True)]
+
+    con = duckdb.connect()
+    con.register('t', dff)
+
+    attrs = [c for c in include_cols if c in dff.columns]
+    req_set = set(required_cols)
+
+    sets = []
+    for d in range(1, max_depth+1):
+        for s in combinations(attrs, d):
+            if req_set.issubset(set(s)):
+                sets.append('(' + ','.join([f"\"{c}\"" for c in s]) + ')')
+
+    if not sets:
+        if required_cols:
+            sets.append('(' + ','.join([f"\"{c}\"" for c in required_cols]) + ')')
+        else:
+            sets.append('(' + ','.join([f"\"{c}\"" for c in attrs[:1]]) + ')')
+
+    grouping_sets_sql = ',\n'.join(sets)
+
+    # Top SKUs (global, among purchasers)
+    top_skus = []
+    if msku_col and msku_col in dff.columns:
+        top_skus = con.execute(
+            f'SELECT "{msku_col}" AS sku, COUNT(*) AS c '
+            f'FROM t WHERE _PURCHASE=1 AND "{msku_col}" IS NOT NULL AND TRIM("{msku_col}")<>\'\' '
+            f'GROUP BY 1 ORDER BY c DESC LIMIT 11'
+        ).fetchdf()['sku'].astype(str).tolist()
+
+    # Build per-SKU SUM(...) columns safely (no "SKU:" prefix)
+    pieces = []
+    for sku in top_skus:
+        s_escaped = sku.replace("'", "''")
+        pieces.append(
+            'SUM(CASE WHEN "{msku}"=\'{sku}\' AND _PURCHASE=1 THEN 1 ELSE 0 END) AS "{label}"'
+            .format(msku=msku_col, sku=s_escaped, label=sku)
+        )
+    sku_sums = ',\n  '.join(pieces)
+    sku_sql = ("\n  ," + sku_sums) if sku_sums else ''
+
+    # Depth expression (still computed but not displayed)
+    depth_expr = ' + '.join([f'CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END' for c in attrs]) if attrs else '0'
+    attrs_sql = ', '.join([f'"{c}"' for c in attrs]) if attrs else "'All' AS overall"
+
+    sql = f"""
+SELECT
+  {attrs_sql},
+  COUNT(*) AS Visitors,
+  SUM(_PURCHASE) AS Purchases,
+  100.0 * SUM(_PURCHASE) / NULLIF(COUNT(*),0) AS conv_rate,
+  ({depth_expr}) AS Depth{sku_sql}
+FROM t
+GROUP BY GROUPING SETS (
+  {grouping_sets_sql}
 )
+HAVING COUNT(*) >= ?
+    """
 
-# Available attributes (adjusted to match CSV columns)
-available_attributes = ['Gender', 'Age_Range', 'Home_Owner', 'Net_Worth', 'Income_Range', 'State', 'Credit_Rating']
+    # --------------- Run & sort ---------------
+    st.subheader('🏆 Ranked Conversion Table')
+    c1, c2 = st.columns(2)
+    with c1:
+        min_rows = st.number_input('Minimum Visitors per group', min_value=1, value=30, step=1)
+    with c2:
+        pass
 
-# Column mapping (to handle spaces in CSV columns)
-column_mapping = {
-    'Gender': 'Gender',
-    'Age_Range': 'Age Range',
-    'Home_Owner': 'Home Owner',
-    'Net_Worth': 'New Worth',
-    'Income_Range': 'Income Range',
-    'State': 'State',
-    'Credit_Rating': 'Credit Rating'
-}
+    res = con.execute(sql, [int(min_rows)]).fetchdf()
+    sort_key = {'Conversion %':'conv_rate','Purchases':'Purchases','Visitors':'Visitors'}[metric_choice]
+    res = res.sort_values(sort_key, ascending=False).head(top_n).reset_index(drop=True)
 
-# Select attributes with toggles, 3 per row
-st.write("Select attributes to include:")
-selected_attributes = []
-specific_values = {}
+    # SKU columns in the same order as top_skus
+    sku_cols = [c for c in top_skus if c in res.columns]
 
-num_cols = 3
-rows = [available_attributes[i:i+num_cols] for i in range(0, len(available_attributes), num_cols)]
+    # --------------- Build display dataframe (no renaming of attribute headers) ---------------
+    disp = res.copy()
+    # Rank
+    disp.insert(0, 'Rank', np.arange(1, len(disp) + 1))
+    # Conversion header: "Conversion" (values as percent string)
+    disp = disp.rename(columns={'conv_rate':'Conversion'})
+    disp['Conversion'] = res['conv_rate'].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else '')
 
-for row in rows:
-    cols = st.columns(num_cols)
-    for idx, attr in enumerate(row):
-        with cols[idx]:
-            include = st.checkbox(f"Include {attr}", value=True, key=f"checkbox_{attr}")
-            if include:
-                selected_attributes.append(attr)
-                col_name = column_mapping[attr]
-                unique_values = df[col_name].dropna().unique().tolist()
-                specific_values[attr] = st.multiselect(
-                    f"Values for {attr} (all if empty)",
-                    options=unique_values,
-                    default=[],
-                    key=f"multiselect_{attr}"
-                )
+    # Format ints
+    def _fmt_int(v):
+        try:
+            if v is None or (isinstance(v, float) and np.isnan(v)):
+                return ''
+            return f"{int(round(float(v))):,}"
+        except Exception:
+            return v
 
-# Compute and cache combo conversions
-combo_data = compute_combo_conversions(df, selected_attributes, specific_values, min_visitors)
+    for c in ['Visitors','Purchases','Depth']:
+        if c in disp.columns:
+            disp[c] = disp[c].map(_fmt_int)
 
-# Display results
-if not selected_attributes:
-    st.warning("Please include at least one attribute to display the table.")
-elif combo_data.empty:
-    st.warning(f"No groups meet the minimum visitor threshold of {min_visitors}. Try a lower value (dataset has {len(df)} rows).")
+    for sc in sku_cols:
+        disp[sc] = disp[sc].map(_fmt_int)
+
+    # --------------- Column order (display & CSV) ---------------
+    # Use your requested logical order for attributes, but map to actual CSV columns found
+    logical_attr_order = ['Gender','Age','Homeowner','Married','Children','Credit rating','Income','Net worth','State']
+    # Map labels -> actual column names (seg_map label -> resolved column name)
+    ordered_attr_cols = [seg_map[lbl] for lbl in logical_attr_order if lbl in seg_map and seg_map[lbl] in disp.columns]
+
+    table_cols = ['Rank','Visitors','Purchases','Conversion'] + ordered_attr_cols + sku_cols
+
+    # --------------- Render & Download ---------------
+    st.dataframe(disp[table_cols], use_container_width=True, hide_index=True)
+
+    csv_out = disp[table_cols]
+    st.download_button('Download ranked combinations (CSV)',
+                       data=csv_out.to_csv(index=False).encode('utf-8'),
+                       file_name='ranked_combinations.csv', mime='text/csv')
+
 else:
-    # Apply UI filter on cached data (optional override)
-    display_data = combo_data.copy()
-    for col, vals in specific_values.items():
-        if vals:
-            display_data = display_data[display_data[col].isin(vals)]
-    # Sort and rank
-    display_data = display_data.sort_values(by=['conversion_rate', 'purchases', 'visitors'], ascending=[False, False, False])
-    display_data['rank'] = range(1, len(display_data) + 1)
-    st.dataframe(display_data)
+    st.info('Upload the merged CSV to begin.')
