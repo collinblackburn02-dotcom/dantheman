@@ -214,7 +214,17 @@ with st.expander("🔎 Filters", expanded=True):
         for i, (label, col) in enumerate(attr_map.items()):
             with cols[i % 3]:
                 # Toggle means INCLUDE
-                include_flags[label] = st.checkbox(f"Include {label}", value=True, key=f"inc_{label}")
+                default_included = {
+    "Ethnicity (skiptrace)": False,
+    "Department": False,
+    "Seniority level": False,
+}
+include_flags[label] = st.checkbox(
+    f"Include {label}",
+    value=default_included.get(label, True),  # default False for the three attributes, True for others
+    key=f"inc_{label}"
+)
+
 
                 # Values list (only enabled if included)
                 vals = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
