@@ -38,20 +38,21 @@ def inject_css():
 st.set_page_config(page_title="Heavenly Health | Insights", layout="wide")
 inject_css()
 
-# ================ BigQuery Connection (CACHING FIXED) =================
+# ================ BigQuery Connection (FIXED FOR SECRETS ERROR) =================
 @st.cache_resource
 def get_bq_client():
-    """Handles the live connection to Google Cloud."""
-    creds_info = st.secrets["gcp_service_account"]
-    # Handle newline characters in the private key if they exist
-    if "private_key" in creds_info:
-        creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-    credentials = service_account.Credentials.from_service_account_info(creds_info)
-    return bigquery.Client(credentials=credentials, project=creds_info["project_id"])
+    # 1. Get secrets and convert to a regular dictionary to allow modification
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    
+    # 2. Fix the private key if it's formatted as a single line with \n
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        
+    credentials = service_account.Credentials.from_service_account_info(creds_dict)
+    return bigquery.Client(credentials=credentials, project=creds_dict["project_id"])
 
 @st.cache_data(ttl=600)
 def load_data():
-    """Pulls the dataframe from BigQuery."""
     client = get_bq_client()
     query = "SELECT * FROM `final_dashboard.demographic_leaderboard` WHERE total_purchasers > 0"
     return client.query(query).to_dataframe()
@@ -71,12 +72,10 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### Toggle Variables")
-    # Toggles to filter the table view
     options = ["Gender", "Age", "Income", "Homeowner/Renter", "State"]
     selected_vars = st.multiselect("Show clusters containing:", options, default=options)
 
-# ================ Logic to Filter Variables =================
-# Map selection to keywords found in the cluster strings
+# ================ Filtering Logic =================
 keyword_map = {
     "Gender": ["M", "F"],
     "Age": ["18-24", "25-34", "35-44", "45-54", "55-64", "65 and older"],
@@ -93,12 +92,10 @@ for v in excluded_vars:
 def filter_clusters(row):
     cluster_str = str(row['demographic_cluster'])
     for word in keywords_to_remove:
-        # Check if an excluded word exists in the cluster name
         if word in cluster_str:
             return False
     return True
 
-# Apply filtering
 dff = df_master[df_master.apply(filter_clusters, axis=1)].copy()
 
 # ================ Leaderboard Display =================
@@ -106,12 +103,10 @@ st.markdown('<div class="heavenly-section-title">🪷 Combined Conversion Rankin
 
 metric_map = {"Conversion": "conv_rate", "Purchasers": "total_purchasers", "Visitors": "total_visitors"}
 
-# Filter by visitor threshold and sort
 dff = dff[dff['total_visitors'] >= min_visitors]
 dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
-dff.index += 1 # Set Rank to 1-based
+dff.index += 1
 
-# Clean up column names for display
 disp = dff.rename(columns={
     "demographic_cluster": "Persona Cluster",
     "total_visitors": "Visitors",
@@ -119,11 +114,10 @@ disp = dff.rename(columns={
     "conv_rate": "Conversion %"
 })
 
-# Display the styled table
 st.dataframe(
     disp.style.format({"Conversion %": "{:.2f}%"})
     .background_gradient(subset=["Conversion %"], cmap='YlGn'),
     use_container_width=True
 )
 
-st.info(f"Displaying {len(dff)} clusters based on active toggles and visitor threshold.")
+st.info(f"Displaying {len(dff)} clusters.")
