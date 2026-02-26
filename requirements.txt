@@ -1,5 +1,5 @@
-streamlit>=1.35
-pandas>=2.0
-duckdb>=1.0.0
-numpy>=1.24
-python-dateutil>=2.8
+streamlit
+pandas
+google-cloud-bigquery
+db-dtypes
+pandas-gbq
