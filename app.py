@@ -1,29 +1,146 @@
-# ================ Inside app.py: Dynamic Type Resolver =================
-# This logic automatically picks the right 'cluster_type' based on what is 'Inc'
-inc_list = sorted(included_types)  # included_types comes from the checkboxes
+import streamlit as st
+import pandas as pd
+from google.cloud import bigquery
+from google.oauth2 import service_account
+
+# ================ Brand palette & CSS =================
+BRAND = {"bg": "#F5F0E6", "fg": "#3A2A26", "accent": "#6E4F3A", "card": "#FFF9F0"}
+
+def inject_css():
+    st.markdown(f"""
+        <style>
+            .stApp {{ background: var(--bg); color: var(--fg); }}
+            .stDataFrame {{ border-radius: 12px; background: var(--card); }}
+            .attr-card {{ background-color: var(--card); border-radius: 12px; padding: 15px; border: 1px solid rgba(58,42,38,0.1); margin-bottom: 12px; }}
+            .attr-title {{ font-weight: 800; color: {BRAND["accent"]}; font-size: 0.95rem; margin-bottom: 8px; }}
+        </style>
+        """, unsafe_allow_html=True)
+
+st.set_page_config(page_title="Heavenly Insights", layout="wide")
+inject_css()
+
+# ================ Connection =================
+@st.cache_resource
+def get_bq_client():
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+    return bigquery.Client(credentials=service_account.Credentials.from_service_account_info(creds_dict), project=creds_dict["project_id"])
+
+@st.cache_data(ttl=600)
+def load_data():
+    client = get_bq_client()
+    df = client.query("SELECT * FROM `final_dashboard.demographic_leaderboard`").to_dataframe()
+    return df.fillna("")
+
+df_master = load_data()
+
+# ================ Sidebar & Global Controls =================
+with st.sidebar:
+    st.header("Global Controls")
+    metric_choice = st.radio("Primary Metric", ["Conv %", "Purchases", "Visitors"])
+    min_visitors = st.number_input("Traffic Floor", value=10)
+    st.markdown("---")
+    if st.button("Reset Filters"):
+        st.rerun()
+
+st.title("🪷 Segment Architect")
+
+# ================ 1. UI: Checkboxes and Dropdowns =================
+# We define these first so the variables exist for the logic below
+cols = st.columns(3)
+configs = [
+    ("Gender", "gender"), ("Age", "age"), ("Income", "income"),
+    ("State", "state"), ("Net Worth", "net_worth"), ("Children", "children")
+]
+
+selected_filters = {}
+included_types = []
+included_columns = []
+
+for i, (label, col_name) in enumerate(configs):
+    with cols[i % 3]:
+        st.markdown(f'<div class="attr-card">', unsafe_allow_html=True)
+        c_title, c_inc = st.columns([3, 1])
+        c_title.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
+        
+        # This is where 'included_types' is populated
+        is_inc = c_inc.checkbox("Inc", value=(i<3), key=f"inc_{col_name}")
+        
+        valid_opts = sorted([x for x in df_master[col_name].unique() if x != ""])
+        val = st.selectbox(f"Filter {label}", ["- All -"] + valid_opts, key=f"filter_{col_name}", label_visibility="collapsed")
+        
+        if is_inc: 
+            included_types.append(col_name)
+            included_columns.append(label)
+        if val != "- All -": 
+            selected_filters[col_name] = val
+            
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ================ 2. Logic: Resolve Combinations =================
+# Now that included_types is defined, we can run the combo logic
 active_types = []
+if included_types:
+    inc_set = set(included_types)
+    active_types.extend(included_types) # Singles
 
-# 1. Add Single Type
-if len(inc_list) >= 1:
-    active_types.extend(inc_list)
+    # Two-Way Logic
+    if "gender" in inc_set and "age" in inc_set: active_types.append("gender_age")
+    if "gender" in inc_set and "income" in inc_set: active_types.append("gender_income")
+    if "gender" in inc_set and "state" in inc_set: active_types.append("gender_state")
+    if "gender" in inc_set and "net_worth" in inc_set: active_types.append("gender_nw")
+    if "gender" in inc_set and "children" in inc_set: active_types.append("gender_children")
+    if "age" in inc_set and "income" in inc_set: active_types.append("age_income")
+    if "age" in inc_set and "net_worth" in inc_set: active_types.append("age_nw")
+    if "state" in inc_set and "income" in inc_set: active_types.append("state_income")
+    if "income" in inc_set and "net_worth" in inc_set: active_types.append("income_nw")
 
-# 2. Add Two-Way Logic (All possible pairs)
-if len(inc_list) >= 2:
-    for i in range(len(inc_list)):
-        for j in range(i + 1, len(inc_list)):
-            # Special naming fix for net_worth vs nw
-            t1 = inc_list[i].replace("net_worth", "nw")
-            t2 = inc_list[j].replace("net_worth", "nw")
-            active_types.append(f"{inc_list[i]}_{inc_list[j]}")
-            active_types.append(f"{inc_list[i]}_{t2}") # Catch nw aliases
+    # Three-Way Logic
+    if {"gender", "age", "income"}.issubset(inc_set): active_types.append("gender_age_income")
+    if {"gender", "age", "state"}.issubset(inc_set): active_types.append("gender_age_state")
+    if {"gender", "income", "state"}.issubset(inc_set): active_types.append("gender_income_state")
+    if {"gender", "income", "net_worth"}.issubset(inc_set): active_types.append("gender_income_nw")
+    if {"gender", "age", "children"}.issubset(inc_set): active_types.append("gender_age_children")
+    if {"age", "income", "net_worth"}.issubset(inc_set): active_types.append("age_income_nw")
+    if {"state", "income", "net_worth"}.issubset(inc_set): active_types.append("state_income_nw")
+    if {"gender", "state", "net_worth"}.issubset(inc_set): active_types.append("gender_state_nw")
 
-# 3. Add Three-Way Logic (Matches the unions we added in SQL)
-# We add them manually to ensure they match the SQL strings exactly
-if "gender" in inc_list and "age" in inc_list and "income" in inc_list: active_types.append("gender_age_income")
-if "gender" in inc_list and "age" in inc_list and "state" in inc_list: active_types.append("gender_age_state")
-if "gender" in inc_list and "income" in inc_list and "state" in inc_list: active_types.append("gender_income_state")
-if "gender" in inc_list and "income" in inc_list and "net_worth" in inc_list: active_types.append("gender_income_nw")
-if "gender" in inc_list and "age" in inc_list and "children" in inc_list: active_types.append("gender_age_children")
-if "age" in inc_list and "income" in inc_list and "net_worth" in inc_list: active_types.append("age_income_nw")
-if "state" in inc_list and "income" in inc_list and "net_worth" in inc_list: active_types.append("state_income_nw")
-if "gender" in inc_list and "state" in inc_list and "net_worth" in inc_list: active_types.append("gender_state_nw")
+# ================ 3. Filtering and Display =================
+dff = df_master[df_master['cluster_type'].isin(active_types)].copy()
+
+# Apply isolation filters from dropdowns
+for col, val in selected_filters.items():
+    dff = dff[dff[col] == val]
+
+if dff.empty:
+    st.warning("No data found for this combination.")
+else:
+    dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
+    dff = dff[dff['total_visitors'] >= min_visitors]
+    
+    metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
+    dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
+    dff.index += 1
+
+    # Map the labels back to internal columns for display
+    label_to_col = {"Gender": "gender", "Age Range": "age", "Income Range": "income", 
+                    "State": "state", "Net Worth": "net_worth", "Children": "children"}
+    
+    # Only show the columns the user checked 'Inc' for
+    final_display_cols = []
+    for label in ["Gender", "Age Range", "Income Range", "State", "Net Worth", "Children"]:
+        internal_name = label_to_col.get(label)
+        if internal_name in included_types:
+            final_display_cols.append(internal_name)
+    
+    final_display_cols += ["total_visitors", "total_purchasers", "Conv %"]
+    
+    st.dataframe(
+        dff[final_display_cols].rename(columns={
+            "gender": "Gender", "age": "Age", "income": "Income", 
+            "state": "State", "net_worth": "Net Worth", "children": "Children",
+            "total_visitors": "Visitors", "total_purchasers": "Purchases"
+        }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
+        use_container_width=True
+    )
