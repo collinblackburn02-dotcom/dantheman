@@ -17,14 +17,15 @@ def inject_css():
                 border: 1px solid rgba(58,42,38,0.1);
                 margin-bottom: 20px;
             }}
-            .attr-title {{ font-weight: 800; font-size: 1.1rem; color: var(--fg); }}
+            .attr-title {{ font-weight: 800; font-size: 1.1rem; color: var(--fg); margin-bottom: 10px; }}
+            .stDataFrame {{ border-radius: 12px; background: var(--card); }}
         </style>
         """, unsafe_allow_html=True)
 
 st.set_page_config(page_title="Heavenly Insights", layout="wide")
 inject_css()
 
-# ================ Data Connection =================
+# ================ Connection =================
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -38,79 +39,95 @@ def load_data():
 
 df = load_data()
 
-# ================ Sidebar (Metric Only) =================
+# ================ Sidebar =================
 with st.sidebar:
-    st.image("logo.png", width=150)
-    metric_choice = st.radio("Sort metric", ["Conversion %", "Purchases", "Visitors"])
-    min_visitors = st.number_input("Minimum Visitors", value=10)
+    st.header("Leaderboard Settings")
+    metric_choice = st.radio("Sort by:", ["Conversion %", "Purchasers", "Visitors"])
+    min_visitors = st.number_input("Min Visitors per segment", value=20)
+    st.markdown("---")
+    max_depth = st.slider("Combination Depth", 1, 4, 2)
 
-# ================ Main Layout: Attribute Grid =================
-st.title("Ranked Insights")
-st.caption("Fast, ranked customer segments.")
+# ================ Main UI: Attribute Cards =================
+st.title("🪷 Ranked Insights")
+st.markdown("Build and filter your target personas using the cards below.")
 
-st.markdown("### Attributes")
 col1, col2, col3 = st.columns(3)
 
-# Mapping our BigQuery columns to your UI labels
+# Map internal column names to pretty labels
 attr_config = {
+    "gender": "Gender",
     "age": "Age Range",
     "income": "Income Range",
+    "tenure": "Homeowner Status",
     "net_worth": "Net Worth",
-    "gender": "Gender",
-    "tenure": "Homeowner",
+    "state": "State",
     "children": "Children"
 }
 
 filters = {}
-active_cols = []
+included_cols = []
 
-# Generate the grid of cards
+# Create the Grid
 for i, (col_name, label) in enumerate(attr_config.items()):
+    if col_name not in df.columns: continue
+    
     target_col = [col1, col2, col3][i % 3]
     with target_col:
         st.markdown(f'<div class="attr-card">', unsafe_allow_html=True)
-        c1, c2 = st.columns([2, 1])
-        with c1: st.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
-        with c2: include = st.checkbox("Include", value=True, key=f"inc_{col_name}")
+        c_title, c_check = st.columns([3, 1])
+        c_title.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
         
-        if include:
-            active_cols.append(col_name)
-            options = sorted(df[col_name].dropna().unique().tolist())
-            selected = st.multiselect("Choose options", options, key=f"sel_{col_name}", label_visibility="collapsed")
+        # Checkbox to include in Persona string
+        is_inc = c_check.checkbox("Inc", value=(i < 2), key=f"inc_{col_name}")
+        
+        if is_inc:
+            included_cols.append(col_name)
+            # Multi-select for filtering specific values
+            options = sorted([str(x) for x in df[col_name].dropna().unique().tolist()])
+            selected = st.multiselect(f"Filter {label}", options, key=f"sel_{col_name}", label_visibility="collapsed")
             if selected:
                 filters[col_name] = selected
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ================ Dynamic Ranking Logic =================
-# Apply multi-select filters
-dff = df.copy()
-for col, vals in filters.items():
-    dff = dff[dff[col].isin(vals)]
+# ================ Dynamic Aggregation =================
+if not included_cols:
+    st.info("Check 'Inc' on the cards above to start building segments.")
+else:
+    # 1. Filter raw data based on card selections
+    dff = df.copy()
+    for col, vals in filters.items():
+        dff = dff[dff[col].isin(vals)]
 
-# Create the "Persona Cluster" string based on what is 'Included'
-def make_cluster(row):
-    parts = [str(row[c]) for c in active_cols if pd.notna(row[c])]
-    return " + ".join(parts) if parts else "All Traffic"
+    # 2. Apply Combination Depth Limit
+    active_cols = included_cols[:max_depth]
 
-dff['Persona Cluster'] = dff.apply(make_cluster, axis=1)
+    # 3. Create Persona String
+    def make_cluster(row):
+        parts = [str(row[c]) for c in active_cols if pd.notna(row[c])]
+        return " + ".join(parts) if parts else "General Traffic"
 
-# Group and Rank
-final = dff.groupby('Persona Cluster').agg({
-    'total_visitors': 'sum',
-    'total_purchasers': 'sum'
-}).reset_index()
+    dff['Persona'] = dff.apply(make_cluster, axis=1)
 
-final['Conversion %'] = (final['total_purchasers'] / final['total_visitors'] * 100).round(2)
-final = final[final['total_visitors'] >= min_visitors]
+    # 4. Sum up the unique visitor/purchaser counts
+    leaderboard = dff.groupby('Persona').agg({
+        'total_visitors': 'sum',
+        'total_purchasers': 'sum'
+    }).reset_index()
 
-# Display Table
-metric_map = {"Conversion %": "Conversion %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
-final = final.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
-final.index += 1
+    # 5. Calculate Final Metrics
+    leaderboard['Conversion %'] = (leaderboard['total_purchasers'] / leaderboard['total_visitors'] * 100).round(2)
+    leaderboard = leaderboard[leaderboard['total_visitors'] >= min_visitors]
 
-st.dataframe(
-    final.rename(columns={'total_visitors': 'Visitors', 'total_purchasers': 'Purchasers'})
-    .style.format({'Conversion %': '{:.2f}%'})
-    .background_gradient(subset=['Conversion %'], cmap='YlGn'),
-    use_container_width=True
-)
+    # 6. Sorting
+    metric_map = {"Conversion %": "Conversion %", "Purchasers": "total_purchasers", "Visitors": "total_visitors"}
+    leaderboard = leaderboard.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
+    leaderboard.index += 1
+
+    # 7. Display
+    st.subheader("Leaderboard")
+    st.dataframe(
+        leaderboard.rename(columns={'total_visitors': 'Visitors', 'total_purchasers': 'Purchasers'})
+        .style.format({'Conversion %': '{:.2f}%'})
+        .background_gradient(subset=['Conversion %'], cmap='YlGn'),
+        use_container_width=True
+    )
