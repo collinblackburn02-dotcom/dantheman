@@ -10,8 +10,15 @@ def inject_css():
     st.markdown(f"""
         <style>
             .stApp {{ background: var(--bg); color: var(--fg); }}
-            .stDataFrame {{ border-radius: 12px; background: var(--card); }}
-            .filter-label {{ font-weight: 700; color: var(--accent); margin-bottom: -15px; }}
+            .attr-card {{
+                background-color: var(--card);
+                border-radius: 12px;
+                padding: 15px;
+                border: 1px solid rgba(58,42,38,0.1);
+                margin-bottom: 10px;
+            }}
+            .stDataFrame {{ border-radius: 12px; }}
+            .attr-title {{ font-weight: 800; color: var(--fg); font-size: 0.9rem; }}
         </style>
         """, unsafe_allow_html=True)
 
@@ -28,10 +35,8 @@ def get_bq_client():
 
 @st.cache_data(ttl=600)
 def load_data():
-    # We pull the cumulative table we built in BigQuery
     df = get_bq_client().query("SELECT * FROM `final_dashboard.demographic_leaderboard`").to_dataframe()
     
-    # Helper to parse the persona string into actual searchable columns
     def parse_persona(row):
         parts = str(row['demographic_cluster']).split(" + ")
         res = {"Gender": "All", "Age": "All", "Income": "All", "State": "All", "NW": "All", "Children": "All"}
@@ -51,65 +56,79 @@ df_master = load_data()
 
 # ================ Sidebar =================
 with st.sidebar:
-    st.header("Global Settings")
-    metric_choice = st.radio("Sort leaderboard by:", ["Conversion %", "Purchases", "Visitors"])
+    st.header("Settings")
+    metric_choice = st.radio("Sort by:", ["Conversion %", "Purchases", "Visitors"])
     min_visitors = st.number_input("Min Visitors", value=10)
+    if st.button("Reset All Filters"):
+        st.rerun()
 
-# ================ Multi-Select Filter Area =================
-st.title("🪷 Segment Explorer")
-st.markdown("Use the dropdowns to isolate specific demographics. Leaving a dropdown at **'All'** includes every sub-group.")
+# ================ Hybrid Control Area =================
+st.title("🪷 Persona Architect")
+st.markdown("1. **Include** to add to combination | 2. **Select** to isolate a segment.")
 
-c1, c2, c3 = st.columns(3)
-c4, c5, c6 = st.columns(3)
+# We'll use a 3-column grid for the cards
+cols = st.columns(3)
+configs = [
+    ("Gender", "gender"), ("Age", "age"), ("Income", "income"),
+    ("State", "state"), ("NW", "net_worth"), ("Children", "children")
+]
 
-# Function to get unique options for dropdowns
-def get_opts(col):
-    opts = sorted([x for x in df_master[col].unique() if x != "All"])
-    return ["All"] + opts
+selected_filters = {}
+included_types = []
 
-with c1: f_gender = st.selectbox("Gender", get_opts("Gender"))
-with c2: f_age = st.selectbox("Age Range", get_opts("Age"))
-with c3: f_income = st.selectbox("Income Range", get_opts("Income"))
-with c4: f_state = st.selectbox("State", get_opts("State"))
-with c5: f_nw = st.selectbox("Net Worth", get_opts("NW"))
-with c6: f_children = st.selectbox("Children Status", get_opts("Children"))
+for i, (label, bq_type) in enumerate(configs):
+    with cols[i % 3]:
+        st.markdown(f'<div class="attr-card">', unsafe_allow_html=True)
+        
+        # Header with Include Checkbox
+        c_title, c_inc = st.columns([3, 1])
+        c_title.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
+        is_inc = c_inc.checkbox("Inc", value=(i<3), key=f"inc_{bq_type}")
+        
+        # Dropdown for isolation
+        opts = sorted([x for x in df_master[label].unique() if x != "All"])
+        val = st.selectbox(f"Filter {label}", ["All"] + opts, key=f"filter_{bq_type}", label_visibility="collapsed")
+        
+        if is_inc: included_types.append(bq_type)
+        if val != "All": selected_filters[label] = val
+            
+        st.markdown('</div>', unsafe_allow_html=True)
 
-# ================ Filtering Logic =================
-dff = df_master.copy()
+# ================ Filter Logic =================
+# 1. Map dynamic combinations based on what is 'Included'
+active_types = [t for t in included_types] # Add singles
 
-# Apply logic: If user selects 'M', we want any cluster that contains 'M' 
-# OR any cluster where Gender is 'All' (to keep single-attribute rows for Age/Income/etc.)
-# Actually, the user's intent is usually: "Show me only segments that involve a Male"
-filters = {
-    "Gender": f_gender, "Age": f_age, "Income": f_income, 
-    "State": f_state, "NW": f_nw, "Children": f_children
-}
+# Logical pairing logic (Add combo types if their components are both checked)
+if "gender" in included_types and "age" in included_types: active_types.append("gender_age")
+if "gender" in included_types and "income" in included_types: active_types.append("gender_income")
+if "gender" in included_types and "state" in included_types: active_types.append("gender_state")
+if "gender" in included_types and "age" in included_types and "income" in included_types: active_types.append("gender_age_income")
+# ... (add other combos as needed)
 
-for col, val in filters.items():
-    if val != "All":
-        dff = dff[dff[col] == val]
+# 2. Filter by the pre-calculated Cluster Type
+dff = df_master[df_master['cluster_type'].isin(active_types)].copy()
 
-# ================ Display =================
+# 3. Apply the Dropdown Isolations
+for col, val in selected_filters.items():
+    dff = dff[dff[col] == val]
+
+# ================ Final Display =================
 if dff.empty:
-    st.warning("No clusters found for this specific combination. Try broadening your filters.")
+    st.warning("No data matches this combination.")
 else:
-    # Math
     dff['Conversion %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
     dff = dff[dff['total_visitors'] >= min_visitors]
-
-    # Sort
+    
+    # Sorting
     metric_map = {"Conversion %": "Conversion %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
     dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
     dff.index += 1
 
-    # Final Table View
-    display_cols = ["Gender", "Age", "Income", "State", "NW", "Children", "total_visitors", "total_purchasers", "Conversion %"]
-    res_table = dff[display_cols].rename(columns={
-        "total_visitors": "Visitors", "total_purchasers": "Purchases", "Conversion %": "Conv %"
-    })
-
+    # Display clean table
+    show_cols = ["Gender", "Age", "Income", "State", "NW", "Children", "total_visitors", "total_purchasers", "Conversion %"]
     st.dataframe(
-        res_table.style.format({'Conv %': '{:.2f}%'})
+        dff[show_cols].rename(columns={"total_visitors": "Visitors", "total_purchasers": "Purchases", "Conversion %": "Conv %"})
+        .style.format({'Conv %': '{:.2f}%'})
         .background_gradient(subset=['Conv %'], cmap='YlGn'),
         use_container_width=True
     )
