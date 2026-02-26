@@ -5,10 +5,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # ================ Brand palette & CSS =================
-BRAND = {
-    "bg": "#F5F0E6", "fg": "#3A2A26", "accent": "#6E4F3A", 
-    "accent2": "#A07A5A", "card": "#FFF9F0", "white": "#FFFFFF",
-}
+BRAND = {"bg": "#F5F0E6", "fg": "#3A2A26", "accent": "#6E4F3A", "card": "#FFF9F0"}
 
 def inject_css():
     st.markdown(f"""
@@ -49,38 +46,37 @@ except Exception as e:
 with st.sidebar:
     st.markdown("### Controls")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
-    min_visitors = st.number_input("Minimum Visitors per group", min_value=1, value=10, step=1)
+    min_visitors = st.number_input("Minimum Visitors per group", min_value=1, value=5, step=1)
     
     st.markdown("---")
     st.markdown("### Toggle Variables")
-    options = ["Gender", "Age", "Income", "Homeowner/Renter", "State"]
+    # Added New variables to the list
+    options = ["Gender", "Age", "Income", "Homeowner/Renter", "State", "Net Worth", "Children", "Marital Status"]
     selected_vars = st.multiselect("Show clusters containing:", options, default=options)
 
-# ================ Logic to Filter Variables & Remove "U" =================
+# ================ Logic to Filter Variables =================
 keyword_map = {
     "Gender": ["M", "F"],
     "Age": ["18-24", "25-34", "35-44", "45-54", "55-64", "65 and older"],
     "Income": ["$", "k", "000"],
     "Homeowner/Renter": ["Homeowner", "Renter"],
-    "State": [s for s in df_master['demographic_cluster'].unique() if len(str(s)) == 2 and str(s).isupper()]
+    "State": [s for s in df_master['demographic_cluster'].unique() if len(str(s)) == 2 and str(s).isupper()],
+    "Net Worth": ["Million", "Worth", "NW"],
+    "Children": ["Children", "Has Children"],
+    "Marital Status": ["Married", "Single"]
 }
 
 excluded_vars = [v for v in options if v not in selected_vars]
 keywords_to_remove = []
 for v in excluded_vars:
-    keywords_to_remove.extend(keyword_map[v])
-
-# Add "U" to the permanent removal list
-permanent_removal = ["U", "Unknown", "U +", "+ U"]
+    keywords_to_remove.extend(keyword_map.get(v, []))
 
 def filter_clusters(row):
     cluster_str = str(row['demographic_cluster'])
-    
-    # 1. Permanently remove "U" gender clusters
+    # Remove 'U' Gender clusters
     if any(u_val in cluster_str.split(" + ") for u_val in ["U", "Unknown"]):
         return False
-        
-    # 2. Apply the dynamic sidebar toggles
+    # Remove unchecked variables
     for word in keywords_to_remove:
         if word in cluster_str:
             return False
@@ -88,9 +84,8 @@ def filter_clusters(row):
 
 dff = df_master[df_master.apply(filter_clusters, axis=1)].copy()
 
-# ================ Leaderboard Display =================
+# ================ Display =================
 st.markdown('<div class="heavenly-section-title">🪷 Combined Conversion Ranking Table</div>', unsafe_allow_html=True)
-
 metric_map = {"Conversion": "conv_rate", "Purchasers": "total_purchasers", "Visitors": "total_visitors"}
 
 dff = dff[dff['total_visitors'] >= min_visitors]
@@ -109,6 +104,3 @@ st.dataframe(
     .background_gradient(subset=["Conversion %"], cmap='YlGn'),
     use_container_width=True
 )
-
-st.info(f"Displaying {len(dff)} high-value clusters.")
-st.info(f"Displaying {len(dff)} clusters.")
