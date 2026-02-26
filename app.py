@@ -123,3 +123,14 @@ with col1:
 with col2:
     st.markdown('<div class="heavenly-attr-title">Age / Income</div>', unsafe_allow_html=True)
     st.table(get_singleton(df_master, "Age")[['demographic_cluster', 'total_visitors', 'total_purchasers', 'conv_rate']])
+
+with col3:
+    st.markdown('<div class="heavenly-attr-title">Tenure</div>', unsafe_allow_html=True)
+    tenure_df = df_master[df_master['demographic_cluster'].isin(['Homeowner', 'Renter'])]
+    st.table(tenure_df[['demographic_cluster', 'total_visitors', 'total_purchasers', 'conv_rate']])
+
+with col4:
+    st.markdown('<div class="heavenly-attr-title">Top States</div>', unsafe_allow_html=True)
+    # This grabs single attributes that look like State codes (2 letters)
+    state_df = df_master[df_master['demographic_cluster'].str.len() == 2].head(10)
+    st.table(state_df[['demographic_cluster', 'total_visitors', 'total_purchasers', 'conv_rate']])
