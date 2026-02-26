@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
@@ -21,7 +20,7 @@ def inject_css():
 st.set_page_config(page_title="Heavenly Health | Insights", layout="wide")
 inject_css()
 
-# ================ BigQuery Connection =================
+# ================ Connection =================
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -33,74 +32,51 @@ def get_bq_client():
 @st.cache_data(ttl=600)
 def load_data():
     client = get_bq_client()
-    query = "SELECT * FROM `final_dashboard.demographic_leaderboard` WHERE total_purchasers > 0"
-    return client.query(query).to_dataframe()
+    return client.query("SELECT * FROM `final_dashboard.demographic_leaderboard`").to_dataframe()
 
 try:
     df_master = load_data()
 except Exception as e:
-    st.error(f"Error connecting to BigQuery: {e}")
+    st.error(f"Error: {e}")
     st.stop()
 
-# ================ Sidebar Controls =================
+# ================ Sidebar =================
 with st.sidebar:
     st.markdown("### Controls")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
-    min_visitors = st.number_input("Minimum Visitors per group", min_value=1, value=5, step=1)
+    min_visitors = st.number_input("Min Visitors", min_value=1, value=5)
     
     st.markdown("---")
     st.markdown("### Toggle Variables")
-    # Added New variables to the list
-    options = ["Gender", "Age", "Income", "Homeowner/Renter", "State", "Net Worth", "Children", "Marital Status"]
-    selected_vars = st.multiselect("Show clusters containing:", options, default=options)
+    
+    # NEW: Select categories based on the actual BigQuery column
+    all_categories = sorted(df_master['category'].unique())
+    selected_categories = st.multiselect(
+        "Show these categories:", 
+        options=all_categories, 
+        default=all_categories
+    )
 
-# ================ Logic to Filter Variables =================
-keyword_map = {
-    "Gender": ["M", "F"],
-    "Age": ["18-24", "25-34", "35-44", "45-54", "55-64", "65 and older"],
-    "Income": ["$", "k", "000"],
-    "Homeowner/Renter": ["Homeowner", "Renter"],
-    "State": [s for s in df_master['demographic_cluster'].unique() if len(str(s)) == 2 and str(s).isupper()],
-    "Net Worth": ["Million", "Worth", "NW"],
-    "Children": ["Children", "Has Children"],
-    "Marital Status": ["Married", "Single"]
-}
-
-excluded_vars = [v for v in options if v not in selected_vars]
-keywords_to_remove = []
-for v in excluded_vars:
-    keywords_to_remove.extend(keyword_map.get(v, []))
-
-def filter_clusters(row):
-    cluster_str = str(row['demographic_cluster'])
-    # Remove 'U' Gender clusters
-    if any(u_val in cluster_str.split(" + ") for u_val in ["U", "Unknown"]):
-        return False
-    # Remove unchecked variables
-    for word in keywords_to_remove:
-        if word in cluster_str:
-            return False
-    return True
-
-dff = df_master[df_master.apply(filter_clusters, axis=1)].copy()
+# ================ Filtering =================
+# We filter directly on the CATEGORY column. 100% accurate.
+dff = df_master[df_master['category'].isin(selected_categories)].copy()
 
 # ================ Display =================
 st.markdown('<div class="heavenly-section-title">🪷 Combined Conversion Ranking Table</div>', unsafe_allow_html=True)
-metric_map = {"Conversion": "conv_rate", "Purchasers": "total_purchasers", "Visitors": "total_visitors"}
 
-dff = dff[dff['total_visitors'] >= min_visitors]
-dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
+metric_map = {"Conversion": "conv_rate", "Purchasers": "total_purchasers", "Visitors": "total_visitors"}
+dff = dff[dff['total_visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
 dff.index += 1
 
-disp = dff.rename(columns={
-    "demographic_cluster": "Persona Cluster",
-    "total_visitors": "Visitors",
-    "total_purchasers": "Purchases",
-    "conv_rate": "Conversion %"
-})
-
 st.dataframe(
-    disp.style.format({"Conversion %": "{:.2f}%"})
+    dff.rename(columns={
+        "demographic_cluster": "Persona Cluster", 
+        "category": "Category",
+        "total_visitors": "Visitors", 
+        "total_purchasers": "Purchases", 
+        "conv_rate": "Conversion %"
+    })
+    .style.format({"Conversion %": "{:.2f}%"})
     .background_gradient(subset=["Conversion %"], cmap='YlGn'),
     use_container_width=True
 )
