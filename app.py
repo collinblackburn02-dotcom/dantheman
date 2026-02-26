@@ -5,7 +5,7 @@ from pathlib import Path
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
-# ================ Brand palette & CSS (STAYING THE SAME) =================
+# ================ Brand palette & CSS =================
 BRAND = {
     "bg": "#F5F0E6",        # beige background
     "fg": "#3A2A26",        # deep brown text
@@ -16,7 +16,8 @@ BRAND = {
 }
 
 def inject_css():
-    st.markdown(f"""
+    st.markdown(
+        f"""
         <style>
             :root {{
                 --bg: {BRAND["bg"]};
@@ -31,82 +32,94 @@ def inject_css():
                 background: linear-gradient(180deg, var(--card), var(--bg));
                 border-right: 1px solid rgba(58,42,38,0.08);
             }}
-            .stDataFrame {{ border-radius: 12px; background: var(--card); }}
+            .stDataFrame {{ border: 1px solid rgba(58,42,38,0.08); border-radius: 12px; background: var(--card); }}
             .heavenly-section-title {{ font-size: 1.6rem; font-weight: 800; color: var(--fg); margin: 1.5rem 0; }}
+            .heavenly-attr-title {{ font-size: 1.25rem; font-weight: 700; color: var(--fg); margin-top: 1rem; }}
         </style>
-        """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
-st.set_page_config(page_title="Heavenly Health | Insights", layout="wide")
+st.set_page_config(page_title="Heavenly Health | Live Insights", layout="wide")
 inject_css()
 
-# ================ BigQuery Authentication =================
+# ================ BigQuery Connection =================
 @st.cache_resource
 def get_bq_client():
     creds_info = st.secrets["gcp_service_account"]
     credentials = service_account.Credentials.from_service_account_info(creds_info)
     return bigquery.Client(credentials=credentials, project=creds_info["project_id"])
 
-client = get_bq_client()
-
-# ================ Data Loading =================
 @st.cache_data(ttl=600)
 def load_data():
-    # This query pulls the clean table we built in BigQuery
+    client = get_bq_client()
     query = "SELECT * FROM `final_dashboard.demographic_leaderboard` WHERE total_purchasers > 0"
     df = client.query(query).to_dataframe()
     return df
 
-df_master = load_data()
+# ================ Load Data =================
+try:
+    df_master = load_data()
+except Exception as e:
+    st.error(f"Error connecting to BigQuery: {e}")
+    st.stop()
 
-# ================ Sidebar Controls =================
+# ================ Sidebar =================
 with st.sidebar:
     st.markdown("### Controls")
     metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
-    min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=50, step=1)
+    min_visitors = st.number_input("Minimum Visitors per group", min_value=1, value=20, step=1)
 
 metric_map = {
-    "Conversion": "conv_rate", 
-    "Purchasers": "total_purchasers", 
+    "Conversion": "conv_rate",
+    "Purchasers": "total_purchasers",
     "Visitors": "total_visitors"
 }
 
-# ================ Main Table Logic =================
-st.markdown('<div class="heavenly-section-title">🪷 Combined Conversion Ranking Table</div>', unsafe_allow_html=True)
+# ================ Main Table =================
+st.markdown('<div class="heavenly-section-title">Combined Conversion Ranking Table</div>', unsafe_allow_html=True)
 
-# Filter by visitors
-dff = df_master[df_master['total_visitors'] >= min_rows].copy()
+# Filter and Sort
+dff = df_master[df_master['total_visitors'] >= min_visitors].copy()
 dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
 dff.index += 1 # Rank starts at 1
 
-# Formatting for display
+# Format for display
 disp = dff.copy()
-disp['conv_rate'] = disp['conv_rate'].map(lambda x: f"{x:.2f}%")
-disp['total_visitors'] = disp['total_visitors'].map(lambda x: f"{int(x):,}")
-disp['total_purchasers'] = disp['total_purchasers'].map(lambda x: f"{int(x):,}")
+disp.rename(columns={
+    "demographic_cluster": "Persona",
+    "total_visitors": "Visitors",
+    "total_purchasers": "Purchasers",
+    "conv_rate": "Conversion %"
+}, inplace=True)
 
-# Table Display
+# Table Styling
 st.dataframe(
-    disp.style.background_gradient(subset=[metric_map[metric_choice]], cmap='YlGn'),
+    disp.style.format({"Conversion %": "{:.2f}%"})
+    .background_gradient(subset=["Conversion %"], cmap='YlGn'),
     use_container_width=True
 )
 
-# ================ Single-Attribute Summaries (The "Pretty" Charts) =================
+# ================ Summaries =================
 st.markdown("---")
-st.markdown('<div class="heavenly-section-title">📑 Single-Attribute Summaries</div>', unsafe_allow_html=True)
+st.markdown('<div class="heavenly-section-title">📑 Single-Attribute Summary Tables</div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 
+# Helper to find single attributes (rows without a ' + ')
+def get_singleton(df, label_filter):
+    singletons = df[~df['demographic_cluster'].str.contains(r'\+')].copy()
+    if label_filter == "Gender":
+        return singletons[singletons['demographic_cluster'].isin(['M', 'F'])]
+    elif label_filter == "Age":
+        # Any singleton that isn't M or F is usually Age or Income
+        return singletons[~singletons['demographic_cluster'].isin(['M', 'F'])]
+    return singletons
+
 with col1:
-    st.markdown("### Gender")
-    # Rows without ' + ' are single-attribute
-    gender_df = df_master[~df_master['demographic_cluster'].str.contains('\+')].copy()
-    # Looking for M/F specifically
-    gender_df = gender_df[gender_df['demographic_cluster'].str.contains('M|F', na=False)]
-    st.dataframe(gender_df[['demographic_cluster', 'total_visitors', 'total_purchasers', 'conv_rate']], hide_index=True)
+    st.markdown('<div class="heavenly-attr-title">Gender</div>', unsafe_allow_html=True)
+    st.table(get_singleton(df_master, "Gender")[['demographic_cluster', 'total_visitors', 'total_purchasers', 'conv_rate']])
 
 with col2:
-    st.markdown("### Age Range")
-    age_df = df_master[~df_master['demographic_cluster'].str.contains('\+')].copy()
-    # Exclude M/F to find Age groups
-    age_df = age_df[~age_df['demographic_cluster'].str.contains('M|F', na=False)]
-    st.dataframe(age_df[['demographic_cluster', 'total_visitors', 'total_purchasers', 'conv_rate']], hide_index=True)
+    st.markdown('<div class="heavenly-attr-title">Age / Income</div>', unsafe_allow_html=True)
+    st.table(get_singleton(df_master, "Age")[['demographic_cluster', 'total_visitors', 'total_purchasers', 'conv_rate']])
