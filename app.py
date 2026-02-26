@@ -9,74 +9,108 @@ BRAND = {"bg": "#F5F0E6", "fg": "#3A2A26", "accent": "#6E4F3A", "card": "#FFF9F0
 def inject_css():
     st.markdown(f"""
         <style>
-            :root {{ --bg: {BRAND["bg"]}; --fg: {BRAND["fg"]}; --accent: {BRAND["accent"]}; }}
             .stApp {{ background: var(--bg); color: var(--fg); }}
-            section[data-testid="stSidebar"] {{ background: var(--card); border-right: 1px solid rgba(58,42,38,0.08); }}
-            .stDataFrame {{ border-radius: 12px; background: var(--card); }}
-            .heavenly-section-title {{ font-size: 1.6rem; font-weight: 800; color: var(--fg); margin: 1.5rem 0; }}
+            .attr-card {{
+                background-color: var(--card);
+                border-radius: 15px;
+                padding: 20px;
+                border: 1px solid rgba(58,42,38,0.1);
+                margin-bottom: 20px;
+            }}
+            .attr-title {{ font-weight: 800; font-size: 1.1rem; color: var(--fg); }}
         </style>
         """, unsafe_allow_html=True)
 
-st.set_page_config(page_title="Heavenly Health | Insights", layout="wide")
+st.set_page_config(page_title="Heavenly Insights", layout="wide")
 inject_css()
 
-# ================ Connection =================
+# ================ Data Connection =================
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
     if "private_key" in creds_dict:
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-    credentials = service_account.Credentials.from_service_account_info(creds_dict)
-    return bigquery.Client(credentials=credentials, project=creds_dict["project_id"])
+    return bigquery.Client(credentials=service_account.Credentials.from_service_account_info(creds_dict), project=creds_dict["project_id"])
 
 @st.cache_data(ttl=600)
 def load_data():
-    client = get_bq_client()
-    return client.query("SELECT * FROM `final_dashboard.demographic_leaderboard`").to_dataframe()
+    return get_bq_client().query("SELECT * FROM `final_dashboard.demographic_leaderboard`").to_dataframe()
 
-try:
-    df_master = load_data()
-except Exception as e:
-    st.error(f"Error: {e}")
-    st.stop()
+df = load_data()
 
-# ================ Sidebar =================
+# ================ Sidebar (Metric Only) =================
 with st.sidebar:
-    st.markdown("### Controls")
-    metric_choice = st.radio("Sort metric", ["Conversion", "Purchasers", "Visitors"], index=0)
-    min_visitors = st.number_input("Min Visitors", min_value=1, value=5)
-    
-    st.markdown("---")
-    st.markdown("### Toggle Variables")
-    
-    # NEW: Select categories based on the actual BigQuery column
-    all_categories = sorted(df_master['category'].unique())
-    selected_categories = st.multiselect(
-        "Show these categories:", 
-        options=all_categories, 
-        default=all_categories
-    )
+    st.image("logo.png", width=150)
+    metric_choice = st.radio("Sort metric", ["Conversion %", "Purchases", "Visitors"])
+    min_visitors = st.number_input("Minimum Visitors", value=10)
 
-# ================ Filtering =================
-# We filter directly on the CATEGORY column. 100% accurate.
-dff = df_master[df_master['category'].isin(selected_categories)].copy()
+# ================ Main Layout: Attribute Grid =================
+st.title("Ranked Insights")
+st.caption("Fast, ranked customer segments.")
 
-# ================ Display =================
-st.markdown('<div class="heavenly-section-title">🪷 Combined Conversion Ranking Table</div>', unsafe_allow_html=True)
+st.markdown("### Attributes")
+col1, col2, col3 = st.columns(3)
 
-metric_map = {"Conversion": "conv_rate", "Purchasers": "total_purchasers", "Visitors": "total_visitors"}
-dff = dff[dff['total_visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
-dff.index += 1
+# Mapping our BigQuery columns to your UI labels
+attr_config = {
+    "age": "Age Range",
+    "income": "Income Range",
+    "net_worth": "Net Worth",
+    "gender": "Gender",
+    "tenure": "Homeowner",
+    "children": "Children"
+}
+
+filters = {}
+active_cols = []
+
+# Generate the grid of cards
+for i, (col_name, label) in enumerate(attr_config.items()):
+    target_col = [col1, col2, col3][i % 3]
+    with target_col:
+        st.markdown(f'<div class="attr-card">', unsafe_allow_html=True)
+        c1, c2 = st.columns([2, 1])
+        with c1: st.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
+        with c2: include = st.checkbox("Include", value=True, key=f"inc_{col_name}")
+        
+        if include:
+            active_cols.append(col_name)
+            options = sorted(df[col_name].dropna().unique().tolist())
+            selected = st.multiselect("Choose options", options, key=f"sel_{col_name}", label_visibility="collapsed")
+            if selected:
+                filters[col_name] = selected
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ================ Dynamic Ranking Logic =================
+# Apply multi-select filters
+dff = df.copy()
+for col, vals in filters.items():
+    dff = dff[dff[col].isin(vals)]
+
+# Create the "Persona Cluster" string based on what is 'Included'
+def make_cluster(row):
+    parts = [str(row[c]) for c in active_cols if pd.notna(row[c])]
+    return " + ".join(parts) if parts else "All Traffic"
+
+dff['Persona Cluster'] = dff.apply(make_cluster, axis=1)
+
+# Group and Rank
+final = dff.groupby('Persona Cluster').agg({
+    'total_visitors': 'sum',
+    'total_purchasers': 'sum'
+}).reset_index()
+
+final['Conversion %'] = (final['total_purchasers'] / final['total_visitors'] * 100).round(2)
+final = final[final['total_visitors'] >= min_visitors]
+
+# Display Table
+metric_map = {"Conversion %": "Conversion %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
+final = final.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
+final.index += 1
 
 st.dataframe(
-    dff.rename(columns={
-        "demographic_cluster": "Persona Cluster", 
-        "category": "Category",
-        "total_visitors": "Visitors", 
-        "total_purchasers": "Purchases", 
-        "conv_rate": "Conversion %"
-    })
-    .style.format({"Conversion %": "{:.2f}%"})
-    .background_gradient(subset=["Conversion %"], cmap='YlGn'),
+    final.rename(columns={'total_visitors': 'Visitors', 'total_purchasers': 'Purchasers'})
+    .style.format({'Conversion %': '{:.2f}%'})
+    .background_gradient(subset=['Conversion %'], cmap='YlGn'),
     use_container_width=True
 )
