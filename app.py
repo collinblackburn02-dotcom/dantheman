@@ -10,21 +10,15 @@ def inject_css():
     st.markdown(f"""
         <style>
             .stApp {{ background: var(--bg); color: var(--fg); }}
-            .attr-card {{
-                background-color: var(--card);
-                border-radius: 15px;
-                padding: 15px;
-                border: 1px solid rgba(58,42,38,0.1);
-                margin-bottom: 10px;
-            }}
-            .attr-title {{ font-weight: 800; font-size: 1rem; color: var(--fg); }}
+            .stDataFrame {{ border-radius: 12px; background: var(--card); }}
+            h1, h2, h3 {{ color: var(--fg); font-weight: 800; }}
         </style>
         """, unsafe_allow_html=True)
 
 st.set_page_config(page_title="Heavenly Insights", layout="wide")
 inject_css()
 
-# ================ BigQuery Connection =================
+# ================ Connection =================
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
@@ -34,26 +28,20 @@ def get_bq_client():
 
 @st.cache_data(ttl=600)
 def load_data():
-    client = get_bq_client()
-    return client.query("SELECT * FROM `final_dashboard.demographic_leaderboard`").to_dataframe()
+    return get_bq_client().query("SELECT * FROM `final_dashboard.demographic_leaderboard`").to_dataframe()
 
-try:
-    df = load_data()
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    st.stop()
+df = load_data()
 
 # ================ Sidebar =================
 with st.sidebar:
-    st.header("Leaderboard Settings")
-    metric_choice = st.radio("Sort by:", ["Conversion %", "Purchasers", "Visitors"])
-    min_visitors = st.number_input("Min Visitors per segment", value=20)
+    st.header("Settings")
+    metric_choice = st.radio("Sort by:", ["Conversion %", "Purchases", "Visitors"])
+    min_visitors = st.number_input("Min Visitors", value=20)
 
-# ================ Main UI: Toggle Area =================
+# ================ Toggle Area =================
 st.title("🪷 Cumulative Leaderboard")
-st.markdown("Select attributes to include their individual and combined stats in the ranking below.")
+st.markdown("Select attributes to rank individual and combined personas.")
 
-# Checkboxes for different attributes
 col1, col2, col3, col4 = st.columns(4)
 with col1: 
     inc_gender = st.checkbox("Gender", value=True)
@@ -66,7 +54,7 @@ with col3:
 with col4: 
     inc_state = st.checkbox("State", value=False)
 
-# Build the filter list based on checked boxes (Matching BigQuery types)
+# Logic to map checkboxes to BigQuery 'cluster_type'
 active_types = []
 if inc_gender: active_types.append('gender')
 if inc_age: active_types.append('age')
@@ -75,38 +63,61 @@ if inc_state: active_types.append('state')
 if inc_nw: active_types.append('net_worth')
 if inc_children: active_types.append('children')
 
-# Handle Combo Types
+# Pairs
 if inc_gender and inc_age: active_types.append('gender_age')
 if inc_gender and inc_income: active_types.append('gender_income')
+if inc_gender and inc_state: active_types.append('gender_state')
 if inc_gender and inc_nw: active_types.append('gender_nw')
 if inc_gender and inc_children: active_types.append('gender_children')
-if inc_gender and inc_age and inc_income: active_types.append('gender_age_income')
+if inc_age and inc_income: active_types.append('age_income')
+if inc_state and inc_income: active_types.append('state_income')
 
-# ================ Filter & Display =================
+# 3-Ways
+if inc_gender and inc_age and inc_income: active_types.append('gender_age_income')
+if inc_gender and inc_nw and inc_income: active_types.append('gender_nw_income')
+if inc_gender and inc_state and inc_income: active_types.append('gender_state_income')
+if inc_gender and inc_age and inc_children: active_types.append('gender_age_children')
+if inc_age and inc_income and inc_nw: active_types.append('age_income_nw')
+
+# ================ Formatting Logic =================
 if not active_types:
-    st.info("Please check at least one attribute to see the rankings.")
+    st.info("Check boxes above to see data.")
 else:
-    # Filter the dataframe pulled from BigQuery
     dff = df[df['cluster_type'].isin(active_types)].copy()
     
-    # Calculate Final Conversion Metric
+    # SPLIT THE PERSONA STRING BACK INTO COLUMNS
+    # This logic looks at the text and puts it in the right "bucket" column
+    def parse_persona(row):
+        parts = str(row['demographic_cluster']).split(" + ")
+        res = {"Gender": "", "Age": "", "Income": "", "State": "", "NW": "", "Children": ""}
+        
+        for p in parts:
+            if p in ["M", "F"]: res["Gender"] = p
+            elif "-" in p or "older" in p: res["Age"] = p
+            elif "$" in p and ("k" in p or "000" in p): res["Income"] = p
+            elif len(p) == 2 and p.isupper(): res["State"] = p
+            elif "Million" in p or "Worth" in p: res["NW"] = p
+            elif p in ["Has Children", "No Children", "Children"]: res["Children"] = p
+        return pd.Series(res)
+
+    parsed_cols = dff.apply(parse_persona, axis=1)
+    dff = pd.concat([dff, parsed_cols], axis=1)
+
+    # Metrics
     dff['Conversion %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
     dff = dff[dff['total_visitors'] >= min_visitors]
 
-    # Map Sidebar Sort Selection
-    metric_map = {"Conversion %": "Conversion %", "Purchasers": "total_purchasers", "Visitors": "total_visitors"}
+    # Sort
+    metric_map = {"Conversion %": "Conversion %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
     dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
-    dff.index += 1 # Ranks start at 1
+    dff.index += 1
 
-    st.subheader("Leaderboard")
+    # Clean up display table
+    display_df = dff[["Gender", "Age", "Income", "State", "NW", "Children", "total_visitors", "total_purchasers", "Conversion %"]]
+    display_df.columns = ["Gender", "Age Range", "Income", "State", "Net Worth", "Children", "Visitors", "Purchases", "Conv %"]
+
     st.dataframe(
-        dff[['demographic_cluster', 'total_visitors', 'total_purchasers', 'Conversion %']]
-        .rename(columns={
-            'demographic_cluster': 'Persona Cluster', 
-            'total_visitors': 'Visitors', 
-            'total_purchasers': 'Purchases'
-        })
-        .style.format({'Conversion %': '{:.2f}%'})
-        .background_gradient(subset=['Conversion %'], cmap='YlGn'),
+        display_df.style.format({'Conv %': '{:.2f}%'})
+        .background_gradient(subset=['Conv %'], cmap='YlGn'),
         use_container_width=True
     )
