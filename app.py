@@ -4,20 +4,47 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # ================ Brand palette & CSS =================
-BRAND = {"bg": "#F5F0E6", "fg": "#3A2A26", "accent": "#6E4F3A", "card": "#FFF9F0"}
+# Inspired by Heavenly Heat Saunas: Clean whites, warm hemlock woods, and dark brown text
+BRAND = {
+    "bg": "#FAF8F5",       # Very light, warm off-white background
+    "fg": "#3A2A26",       # Dark brown for main text (matches your logo text)
+    "accent": "#8C6239",   # Warm cedar/hemlock brown for accents and titles
+    "card": "#FFFFFF"      # Crisp white for the data cards
+}
 
 def inject_css():
     st.markdown(f"""
         <style>
-            .stApp {{ background: var(--bg); color: var(--fg); }}
-            .stDataFrame {{ border-radius: 12px; background: var(--card); }}
-            .attr-card {{ background-color: var(--card); border-radius: 12px; padding: 15px; border: 1px solid rgba(58,42,38,0.1); margin-bottom: 12px; }}
-            .attr-title {{ font-weight: 800; color: {BRAND["accent"]}; font-size: 0.95rem; margin-bottom: 8px; }}
+            /* Main background and text */
+            .stApp {{ background: {BRAND["bg"]}; color: {BRAND["fg"]}; }}
+            
+            /* Dataframe styling */
+            .stDataFrame {{ border-radius: 12px; background: {BRAND["card"]}; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
+            
+            /* Custom attribute cards */
+            .attr-card {{ 
+                background-color: {BRAND["card"]}; 
+                border-radius: 12px; 
+                padding: 15px; 
+                border: 1px solid rgba(140, 98, 57, 0.2); 
+                margin-bottom: 12px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+            }}
+            .attr-title {{ font-weight: 800; color: {BRAND["accent"]}; font-size: 0.95rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }}
+            
+            /* Sidebar styling */
+            [data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid rgba(140, 98, 57, 0.1); }}
         </style>
         """, unsafe_allow_html=True)
 
-st.set_page_config(page_title="Heavenly Insights", layout="wide")
+# Set the page title and icon
+st.set_page_config(page_title="Heavenly Insights", page_icon="🪵", layout="wide")
 inject_css()
+
+# Inject the logo at the top of the sidebar
+# (If the image link breaks in the future, just right-click your logo on your website, click "Copy Image Address", and paste it here!)
+st.sidebar.image("https://heavenlyheatsaunas.com/cdn/shop/files/Heavenly_Heat_Saunas_Logo.png", use_container_width=True)
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
 
 # ================ Connection =================
 @st.cache_resource
