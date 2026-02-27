@@ -47,7 +47,6 @@ with st.sidebar:
 st.title("🪷 Segment Architect")
 
 # ================ 1. UI: Checkboxes and Dropdowns =================
-# We define these first so the variables exist for the logic below
 cols = st.columns(3)
 configs = [
     ("Gender", "gender"), ("Age", "age"), ("Income", "income"),
@@ -64,7 +63,6 @@ for i, (label, col_name) in enumerate(configs):
         c_title, c_inc = st.columns([3, 1])
         c_title.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
         
-        # This is where 'included_types' is populated
         is_inc = c_inc.checkbox("Inc", value=(i<3), key=f"inc_{col_name}")
         
         valid_opts = sorted([x for x in df_master[col_name].unique() if x != ""])
@@ -79,7 +77,6 @@ for i, (label, col_name) in enumerate(configs):
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ================ 2. Logic: Resolve Combinations =================
-# Now that included_types is defined, we can run the combo logic
 active_types = []
 if included_types:
     inc_set = set(included_types)
