@@ -25,7 +25,6 @@ def inject_css():
 st.set_page_config(page_title="Heavenly Insights", page_icon="🪵", layout="wide")
 inject_css()
 
-# Look for 'logo.png' in the github folder. If it's there, display it!
 if os.path.exists("logo.png"):
     st.sidebar.image("logo.png", use_container_width=True)
 else:
@@ -64,30 +63,25 @@ st.title("🪵 Audience Insights Engine")
 cols = st.columns(3)
 configs = [
     ("Gender", "gender"), ("Age", "age"), ("Income", "income"),
-    ("State", "state"), ("Net Worth", "net_worth"), ("Children", "children")
+    ("State", "state"), ("Net Worth", "net_worth"), ("Children", "children"),
+    ("Credit Rating", "credit_rating") # <--- NEW VARIABLE
 ]
 
 selected_filters = {}
 included_types = []
-included_columns = []
 
 for i, (label, col_name) in enumerate(configs):
     with cols[i % 3]:
-        # Using native Streamlit container to eliminate the white ovals
         with st.container(border=True):
             c_title, c_inc = st.columns([3, 1])
             c_title.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
             
             is_inc = c_inc.checkbox("Inc", value=(i<3), key=f"inc_{col_name}")
-            
             valid_opts = sorted([x for x in df_master[col_name].unique() if x != ""])
             val = st.selectbox(f"Filter {label}", ["- All -"] + valid_opts, key=f"filter_{col_name}", label_visibility="collapsed")
             
-            if is_inc: 
-                included_types.append(col_name)
-                included_columns.append(label)
-            if val != "- All -": 
-                selected_filters[col_name] = val
+            if is_inc: included_types.append(col_name)
+            if val != "- All -": selected_filters[col_name] = val
 
 # ================ 2. Logic: Resolve Combinations =================
 active_types = []
@@ -104,6 +98,17 @@ if included_types:
     if "age" in inc_set and "net_worth" in inc_set: active_types.append("age_nw")
     if "state" in inc_set and "income" in inc_set: active_types.append("state_income")
     if "income" in inc_set and "net_worth" in inc_set: active_types.append("income_nw")
+    if "state" in inc_set and "net_worth" in inc_set: active_types.append("state_nw")
+    if "state" in inc_set and "children" in inc_set: active_types.append("state_children")
+    if "net_worth" in inc_set and "children" in inc_set: active_types.append("nw_children")
+
+    # NEW CREDIT PAIRS
+    if "gender" in inc_set and "credit_rating" in inc_set: active_types.append("gender_credit")
+    if "age" in inc_set and "credit_rating" in inc_set: active_types.append("age_credit")
+    if "income" in inc_set and "credit_rating" in inc_set: active_types.append("income_credit")
+    if "state" in inc_set and "credit_rating" in inc_set: active_types.append("state_credit")
+    if "net_worth" in inc_set and "credit_rating" in inc_set: active_types.append("nw_credit")
+    if "children" in inc_set and "credit_rating" in inc_set: active_types.append("children_credit")
 
     if {"gender", "age", "income"}.issubset(inc_set): active_types.append("gender_age_income")
     if {"gender", "age", "state"}.issubset(inc_set): active_types.append("gender_age_state")
@@ -113,6 +118,10 @@ if included_types:
     if {"age", "income", "net_worth"}.issubset(inc_set): active_types.append("age_income_nw")
     if {"state", "income", "net_worth"}.issubset(inc_set): active_types.append("state_income_nw")
     if {"gender", "state", "net_worth"}.issubset(inc_set): active_types.append("gender_state_nw")
+    if {"state", "net_worth", "children"}.issubset(inc_set): active_types.append("state_nw_children")
+    
+    if len(inc_set) == 6: active_types.append("all_6")
+    if len(inc_set) == 7: active_types.append("all_7") # MASTER 7-WAY
 
 # ================ 3. Filtering and Display =================
 dff = df_master[df_master['cluster_type'].isin(active_types)].copy()
@@ -120,45 +129,43 @@ dff = df_master[df_master['cluster_type'].isin(active_types)].copy()
 for col, val in selected_filters.items():
     dff = dff[dff[col] == val]
 
-if dff.empty:
-    st.warning("No data found for this combination.")
-else:
+if not dff.empty:
     dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
     dff = dff[dff['total_visitors'] >= min_visitors]
-    
-    # ------------------ SKU Parsing Logic ------------------
+
+if dff.empty:
+    st.warning("No data found for this combination, or it didn't meet the Traffic Floor minimum.")
+else:
     sku_cols = []
     if 'sku_string' in dff.columns:
-        # Parse the aggregated BigQuery string into a dynamic dictionary of products
         parsed_skus = dff['sku_string'].apply(
             lambda x: dict(item.split("::") for item in str(x).split("~~") if "::" in item) if pd.notna(x) and x != "" else {}
         )
-        # Turn the dictionary into beautiful, sortable columns
         sku_df = pd.DataFrame(parsed_skus.tolist(), index=dff.index).fillna(0).astype(int)
         dff = pd.concat([dff, sku_df], axis=1)
         sku_cols = sorted(list(sku_df.columns))
-    # -------------------------------------------------------
 
     metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
     dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
     dff.index += 1
 
     label_to_col = {"Gender": "gender", "Age Range": "age", "Income Range": "income", 
-                    "State": "state", "Net Worth": "net_worth", "Children": "children"}
+                    "State": "state", "Net Worth": "net_worth", "Children": "children",
+                    "Credit Rating": "credit_rating"} # <--- Added mapping
     
     final_display_cols = []
-    for label in ["Gender", "Age Range", "Income Range", "State", "Net Worth", "Children"]:
+    # Updated mapping list
+    for label in ["Gender", "Age Range", "Income Range", "State", "Net Worth", "Children", "Credit Rating"]:
         internal_name = label_to_col.get(label)
         if internal_name in included_types:
             final_display_cols.append(internal_name)
     
-    # Append the base metrics, then pin all the new SKU columns to the far right!
     final_display_cols += ["total_visitors", "total_purchasers", "Conv %"] + sku_cols
     
     st.dataframe(
         dff[final_display_cols].rename(columns={
             "gender": "Gender", "age": "Age", "income": "Income", 
-            "state": "State", "net_worth": "Net Worth", "children": "Children",
+            "state": "State", "net_worth": "Net Worth", "children": "Children", "credit_rating": "Credit Rating",
             "total_visitors": "Visitors", "total_purchasers": "Purchases"
         }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
         use_container_width=True
