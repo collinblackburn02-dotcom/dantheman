@@ -1,8 +1,7 @@
-streamlit
-pandas
-google-cloud-bigquery
-db-dtypes
-pandas-gbq
-matplotlib
-pandasai
-google-generativeai
+streamlit>=1.40.0
+pandas>=2.2.0
+google-cloud-bigquery>=3.20.0
+db-dtypes>=1.2.0
+pandasai==2.3.0
+google-generativeai>=0.8.0
+matplotlib>=3.8.0
