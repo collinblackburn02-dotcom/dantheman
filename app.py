@@ -258,3 +258,48 @@ if not df_single.empty:
         )
 else:
     st.info("No data available for this variable.")
+
+# ================ 5. NEW: AI Data Agent (Gemini) =================
+st.markdown("<hr>", unsafe_allow_html=True)
+st.subheader("🤖 Heavenly AI Data Agent")
+
+if "GEMINI_API_KEY" not in st.secrets:
+    st.warning("⚠️ **API Key Missing:** Please add your `GEMINI_API_KEY` to your Streamlit secrets to wake up the AI agent.")
+else:
+    from pandasai import SmartDataframe
+    from pandasai.llm import GoogleGemini
+    
+    # 1. Boot up the LLM (That's me!)
+    llm = GoogleGemini(api_key=st.secrets["GEMINI_API_KEY"])
+    
+    # 2. Turn your raw data into a "Smart" dataframe that can execute code
+    sdf = SmartDataframe(df_master, config={"llm": llm})
+
+    # 3. Initialize Streamlit's built-in chat memory
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # 4. Draw the previous chat messages on the screen
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # 5. The Chat Input Box
+    if prompt := st.chat_input("Ask me anything about your audience data..."):
+        
+        # Display the user's question instantly
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Generate the AI's response
+        with st.chat_message("assistant"):
+            with st.spinner("Crunching the numbers..."):
+                try:
+                    # The AI writes the code, runs it, and generates the answer
+                    response = sdf.chat(prompt)
+                    st.markdown(response)
+                    # Save the answer to memory
+                    st.session_state.messages.append({"role": "assistant", "content": str(response)})
+                except Exception as e:
+                    st.error(f"I hit a snag trying to calculate that: {e}")
