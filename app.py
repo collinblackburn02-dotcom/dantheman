@@ -20,6 +20,25 @@ def inject_css():
             .attr-title {{ font-weight: 800; color: {BRAND["accent"]}; font-size: 0.95rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }}
             [data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid rgba(140, 98, 57, 0.1); }}
             hr {{ border-top: 1px solid rgba(140, 98, 57, 0.2); margin-top: 2rem; margin-bottom: 2rem; }}
+            
+            /* Custom styling for our new toggle buttons */
+            div[data-testid="stButton"] button[kind="primary"] {{
+                background-color: {BRAND["accent"]};
+                color: white;
+                font-weight: 800;
+                border: 1px solid {BRAND["accent"]};
+                transition: all 0.2s ease-in-out;
+            }}
+            div[data-testid="stButton"] button[kind="secondary"] {{
+                background-color: {BRAND["card"]};
+                color: {BRAND["fg"]};
+                border: 1px solid rgba(140, 98, 57, 0.2);
+                transition: all 0.2s ease-in-out;
+            }}
+            div[data-testid="stButton"] button[kind="secondary"]:hover {{
+                border: 1px solid {BRAND["accent"]};
+                color: {BRAND["accent"]};
+            }}
         </style>
         """, unsafe_allow_html=True)
 
@@ -53,7 +72,6 @@ df_master = load_data()
 with st.sidebar:
     st.header("Global Controls")
     metric_choice = st.radio("Primary Metric", ["Conv %", "Purchases", "Visitors"])
-    # CHANGED: Default Traffic Floor is now 250
     min_visitors = st.number_input("Traffic Floor", value=250)
     st.markdown("---")
     if st.button("Reset Filters"):
@@ -172,11 +190,10 @@ else:
         use_container_width=True
     )
 
-# ================ 4. NEW: Single Variable Deep Dive =================
+# ================ 4. NEW: Single Variable Toggle Bar =================
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("🔍 Single Variable Deep Dive")
 
-# Options for the dropdown menu
 single_var_options = {
     "Gender": "gender",
     "Age": "age",
@@ -187,25 +204,36 @@ single_var_options = {
     "Credit Rating": "credit_rating"
 }
 
-# The selector widget
-selected_single_label = st.selectbox(
-    "Select a variable to analyze independently:", 
-    list(single_var_options.keys())
-)
+# 1. Initialize the memory so the app knows which button is active
+if "active_single_var" not in st.session_state:
+    st.session_state.active_single_var = "Gender"
+
+# 2. Draw a beautiful row of 7 columns for our buttons
+var_cols = st.columns(len(single_var_options))
+
+# 3. Create the buttons
+for i, label in enumerate(single_var_options.keys()):
+    # If this button is the active one, mark it "primary" (bold/brown). Otherwise "secondary" (white).
+    btn_type = "primary" if st.session_state.active_single_var == label else "secondary"
+    
+    # When clicked, update the memory and instantly refresh the page
+    if var_cols[i].button(label, key=f"btn_{label}", type=btn_type, use_container_width=True):
+        st.session_state.active_single_var = label
+        st.rerun()
+
+# 4. Grab the data for whichever button is currently bolded
+selected_single_label = st.session_state.active_single_var
 selected_single_col = single_var_options[selected_single_label]
 
-# Grab only the rows where cluster_type matches the single variable
 df_single = df_master[df_master['cluster_type'] == selected_single_col].copy()
 
 if not df_single.empty:
-    # Calculate conversion and apply the 250 traffic floor
     df_single['Conv %'] = (df_single['total_purchasers'] / df_single['total_visitors'] * 100).round(2)
     df_single = df_single[df_single['total_visitors'] >= min_visitors]
     
     if df_single.empty:
         st.info(f"No groups within **{selected_single_label}** met the Traffic Floor minimum of {min_visitors}.")
     else:
-        # Build the SKU columns for this table too!
         sku_cols_single = []
         if 'sku_string' in df_single.columns:
             parsed_skus_single = df_single['sku_string'].apply(
