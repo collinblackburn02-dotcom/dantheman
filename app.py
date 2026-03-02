@@ -19,6 +19,7 @@ def inject_css():
             .stDataFrame {{ border-radius: 12px; background: {BRAND["card"]}; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
             .attr-title {{ font-weight: 800; color: {BRAND["accent"]}; font-size: 0.95rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }}
             [data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid rgba(140, 98, 57, 0.1); }}
+            hr {{ border-top: 1px solid rgba(140, 98, 57, 0.2); margin-top: 2rem; margin-bottom: 2rem; }}
         </style>
         """, unsafe_allow_html=True)
 
@@ -52,7 +53,8 @@ df_master = load_data()
 with st.sidebar:
     st.header("Global Controls")
     metric_choice = st.radio("Primary Metric", ["Conv %", "Purchases", "Visitors"])
-    min_visitors = st.number_input("Traffic Floor", value=10)
+    # CHANGED: Default Traffic Floor is now 250
+    min_visitors = st.number_input("Traffic Floor", value=250)
     st.markdown("---")
     if st.button("Reset Filters"):
         st.rerun()
@@ -64,7 +66,7 @@ cols = st.columns(3)
 configs = [
     ("Gender", "gender"), ("Age", "age"), ("Income", "income"),
     ("State", "state"), ("Net Worth", "net_worth"), ("Children", "children"),
-    ("Credit Rating", "credit_rating") # <--- NEW VARIABLE
+    ("Credit Rating", "credit_rating")
 ]
 
 selected_filters = {}
@@ -102,7 +104,6 @@ if included_types:
     if "state" in inc_set and "children" in inc_set: active_types.append("state_children")
     if "net_worth" in inc_set and "children" in inc_set: active_types.append("nw_children")
 
-    # NEW CREDIT PAIRS
     if "gender" in inc_set and "credit_rating" in inc_set: active_types.append("gender_credit")
     if "age" in inc_set and "credit_rating" in inc_set: active_types.append("age_credit")
     if "income" in inc_set and "credit_rating" in inc_set: active_types.append("income_credit")
@@ -121,13 +122,15 @@ if included_types:
     if {"state", "net_worth", "children"}.issubset(inc_set): active_types.append("state_nw_children")
     
     if len(inc_set) == 6: active_types.append("all_6")
-    if len(inc_set) == 7: active_types.append("all_7") # MASTER 7-WAY
+    if len(inc_set) == 7: active_types.append("all_7")
 
-# ================ 3. Filtering and Display =================
+# ================ 3. Main Combination Display =================
 dff = df_master[df_master['cluster_type'].isin(active_types)].copy()
 
 for col, val in selected_filters.items():
     dff = dff[dff[col] == val]
+
+metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
 
 if not dff.empty:
     dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
@@ -145,16 +148,14 @@ else:
         dff = pd.concat([dff, sku_df], axis=1)
         sku_cols = sorted(list(sku_df.columns))
 
-    metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
     dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
     dff.index += 1
 
     label_to_col = {"Gender": "gender", "Age Range": "age", "Income Range": "income", 
                     "State": "state", "Net Worth": "net_worth", "Children": "children",
-                    "Credit Rating": "credit_rating"} # <--- Added mapping
+                    "Credit Rating": "credit_rating"}
     
     final_display_cols = []
-    # Updated mapping list
     for label in ["Gender", "Age Range", "Income Range", "State", "Net Worth", "Children", "Credit Rating"]:
         internal_name = label_to_col.get(label)
         if internal_name in included_types:
@@ -170,3 +171,62 @@ else:
         }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
         use_container_width=True
     )
+
+# ================ 4. NEW: Single Variable Deep Dive =================
+st.markdown("<hr>", unsafe_allow_html=True)
+st.subheader("🔍 Single Variable Deep Dive")
+
+# Options for the dropdown menu
+single_var_options = {
+    "Gender": "gender",
+    "Age": "age",
+    "Income": "income",
+    "State": "state",
+    "Net Worth": "net_worth",
+    "Children": "children",
+    "Credit Rating": "credit_rating"
+}
+
+# The selector widget
+selected_single_label = st.selectbox(
+    "Select a variable to analyze independently:", 
+    list(single_var_options.keys())
+)
+selected_single_col = single_var_options[selected_single_label]
+
+# Grab only the rows where cluster_type matches the single variable
+df_single = df_master[df_master['cluster_type'] == selected_single_col].copy()
+
+if not df_single.empty:
+    # Calculate conversion and apply the 250 traffic floor
+    df_single['Conv %'] = (df_single['total_purchasers'] / df_single['total_visitors'] * 100).round(2)
+    df_single = df_single[df_single['total_visitors'] >= min_visitors]
+    
+    if df_single.empty:
+        st.info(f"No groups within **{selected_single_label}** met the Traffic Floor minimum of {min_visitors}.")
+    else:
+        # Build the SKU columns for this table too!
+        sku_cols_single = []
+        if 'sku_string' in df_single.columns:
+            parsed_skus_single = df_single['sku_string'].apply(
+                lambda x: dict(item.split("::") for item in str(x).split("~~") if "::" in item) if pd.notna(x) and x != "" else {}
+            )
+            sku_df_single = pd.DataFrame(parsed_skus_single.tolist(), index=df_single.index).fillna(0).astype(int)
+            df_single = pd.concat([df_single, sku_df_single], axis=1)
+            sku_cols_single = sorted(list(sku_df_single.columns))
+            
+        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
+        df_single.index += 1
+        
+        display_cols = [selected_single_col, "total_visitors", "total_purchasers", "Conv %"] + sku_cols_single
+        
+        st.dataframe(
+            df_single[display_cols].rename(columns={
+                selected_single_col: selected_single_label,
+                "total_visitors": "Visitors", 
+                "total_purchasers": "Purchases"
+            }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
+            use_container_width=True
+        )
+else:
+    st.info("No data available for this variable.")
