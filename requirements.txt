@@ -7,3 +7,5 @@ matplotlib
 pandasai
 google-generativeai
 PyYAML
+langchain
+langchain-google-genai
