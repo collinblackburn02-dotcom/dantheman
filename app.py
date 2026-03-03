@@ -267,10 +267,13 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.warning("⚠️ **API Key Missing:** Please add your `GEMINI_API_KEY` to your Streamlit secrets to wake up the AI agent.")
 else:
     from pandasai import SmartDataframe
-    from pandasai.llm import GoogleGemini
+    from langchain_google_genai import ChatGoogleGenerativeAI
     
-    # 1. Boot up the LLM (That's me!)
-    llm = GoogleGemini(api_key=st.secrets["GEMINI_API_KEY"], model="gemini-2.5-flash")
+    # 1. Boot up the LLM (Using LangChain to bypass the gemini-pro bug!)
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash", 
+        google_api_key=st.secrets["GEMINI_API_KEY"]
+    )
     
     # 2. Turn your raw data into a "Smart" dataframe that can execute code
     sdf = SmartDataframe(df_master, config={"llm": llm})
