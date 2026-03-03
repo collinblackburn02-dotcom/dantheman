@@ -270,7 +270,7 @@ else:
     from pandasai.llm import GoogleGemini
     
     # 1. Boot up the LLM (That's me!)
-    llm = GoogleGemini(api_key=st.secrets["GEMINI_API_KEY"])
+    llm = GoogleGemini(api_key=st.secrets["GEMINI_API_KEY"], model="gemini-2.5-flash")
     
     # 2. Turn your raw data into a "Smart" dataframe that can execute code
     sdf = SmartDataframe(df_master, config={"llm": llm})
