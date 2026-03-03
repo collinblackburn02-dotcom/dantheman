@@ -6,3 +6,4 @@ pandas-gbq
 matplotlib
 pandasai
 google-generativeai
+PyYAML
