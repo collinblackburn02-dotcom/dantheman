@@ -143,10 +143,10 @@ if included_types and not dff.empty:
                 total_purchasers=('total_purchasers', 'sum')
             ).reset_index()
             
-            # Fill the remaining unchecked columns with "Any" so they stack neatly
+            # Fill the remaining unchecked columns with "" so they stack neatly
             for col in included_types:
                 if col not in subset:
-                    grp[col] = "Any"
+                    grp[col] = ""
                     
             all_combos_dfs.append(grp)
             
