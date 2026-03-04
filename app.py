@@ -4,7 +4,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import os
 import itertools 
-import re # <-- NEW: We need this to extract numbers from your text buckets!
+import re 
 
 # ================ Brand palette & CSS =================
 BRAND = {
@@ -100,28 +100,31 @@ for i, (label, col_name) in enumerate(configs):
             is_inc = c_inc.checkbox("Inc", value=False, key=f"inc_{col_name}")
             raw_opts = [x for x in df_master[col_name].unique() if x != ""]
             
-            # NEW: Custom numerical sorting for Income and Net Worth (High to Low)
             if col_name in ['income', 'net_worth']:
                 def extract_val(s):
-                    # Removes commas and finds the first number string (even if it's negative)
                     nums = re.findall(r'-?\d+', s.replace(',', ''))
                     return float(nums[0]) if nums else 0
-                
                 valid_opts = sorted(raw_opts, key=extract_val, reverse=True)
             else:
                 valid_opts = sorted(raw_opts)
                 
-            val = st.selectbox(f"Filter {label}", ["- All -"] + valid_opts, key=f"filter_{col_name}", label_visibility="collapsed")
+            val = st.multiselect(
+                f"Filter {label}", 
+                valid_opts, 
+                key=f"filter_{col_name}", 
+                label_visibility="collapsed",
+                placeholder="- All -"
+            )
             
             if is_inc: included_types.append(col_name)
-            if val != "- All -": selected_filters[col_name] = val
+            if val: selected_filters[col_name] = val
 
 # ================ 2. NEW DYNAMIC LOGIC: The Data Cube =================
-dff = df_master.copy()
-
-for col, val in selected_filters.items():
-    if col in dff.columns:
-        dff = dff[dff[col] == val]
+# Apply the global multi-select filters FIRST
+dff_filtered = df_master.copy()
+for col, vals in selected_filters.items():
+    if col in dff_filtered.columns:
+        dff_filtered = dff_filtered[dff_filtered[col].isin(vals)]
 
 metric_map = {
     "Conv %": "Conv %", 
@@ -131,18 +134,18 @@ metric_map = {
     "Rev/Visitor": "Rev/Visitor"
 }
 
-if included_types and not dff.empty:
+if included_types and not dff_filtered.empty:
     all_combos_dfs = []
     max_combo_size = min(3, len(included_types))
     
     if len(included_types) > 3:
-        st.info("💡 **Compute Saver Active:** You selected more than 3 variables. The table is automatically capping combination groups at a maximum of 3 to keep the dashboard lightning fast!")
+        st.info("💡 **Compute Saver Active:** You selected more than 3 variables. The table is capping combination groups at a maximum of 3.")
     
     for r in range(1, max_combo_size + 1):
         for subset in itertools.combinations(included_types, r):
             subset = list(subset)
             
-            temp_df = dff.copy()
+            temp_df = dff_filtered.copy()
             
             for col in subset:
                 temp_df = temp_df[temp_df[col] != ""]
@@ -156,30 +159,34 @@ if included_types and not dff.empty:
                 total_revenue=('total_revenue', 'sum') 
             ).reset_index()
             
+            # THE FIX: Replace "Any" with completely blank cells for a cleaner look
             for col in included_types:
                 if col not in subset:
-                    grp[col] = ""
+                    if col in selected_filters and selected_filters[col]:
+                        grp[col] = ", ".join(selected_filters[col])
+                    else:
+                        grp[col] = "" 
                     
             all_combos_dfs.append(grp)
             
     if all_combos_dfs:
-        dff = pd.concat(all_combos_dfs, ignore_index=True)
+        dff_display = pd.concat(all_combos_dfs, ignore_index=True)
         
-        dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
-        dff['Rev/Visitor'] = (dff['total_revenue'] / dff['total_visitors']).round(2)
+        dff_display['Conv %'] = (dff_display['total_purchasers'] / dff_display['total_visitors'] * 100).round(2)
+        dff_display['Rev/Visitor'] = (dff_display['total_revenue'] / dff_display['total_visitors']).round(2)
         
-        dff = dff[dff['total_visitors'] >= min_visitors]
+        dff_display = dff_display[dff_display['total_visitors'] >= min_visitors]
         
-        if dff.empty:
+        if dff_display.empty:
             st.warning("No combinations met the Traffic Floor minimum.")
         else:
-            dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
-            dff.index += 1
+            dff_display = dff_display.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
+            dff_display.index += 1
             
             final_display_cols = included_types + ["total_visitors", "total_purchasers", "Conv %", "total_revenue", "Rev/Visitor"]
             
             st.dataframe(
-                dff[final_display_cols].rename(columns={
+                dff_display[final_display_cols].rename(columns={
                     "gender": "Gender", "age": "Age", "income": "Income", 
                     "state": "State", "net_worth": "Net Worth", "children": "Children", "credit_rating": "Credit Rating",
                     "total_visitors": "Visitors", "total_purchasers": "Purchases", "total_revenue": "Revenue"
@@ -196,13 +203,13 @@ if included_types and not dff.empty:
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes above to break down your audience by specific traits.")
     
-    total_vis = dff['total_visitors'].sum()
-    total_purch = dff['total_purchasers'].sum()
-    total_rev = dff['total_revenue'].sum()
+    total_vis = dff_filtered['total_visitors'].sum()
+    total_purch = dff_filtered['total_purchasers'].sum()
+    total_rev = dff_filtered['total_revenue'].sum()
     
     if total_vis >= min_visitors:
         summary_df = pd.DataFrame([{
-            "Audience Segment": "All Traffic (Unfiltered)",
+            "Audience Segment": "All Traffic (Based on Current Filters)",
             "Visitors": total_vis,
             "Purchases": total_purch,
             "Revenue": total_rev,
@@ -249,6 +256,7 @@ for i, label in enumerate(single_var_options.keys()):
 selected_single_label = st.session_state.active_single_var
 selected_single_col = single_var_options[selected_single_label]
 
+# THE FIX: We pull directly from the unfiltered df_master here so the global filters above don't ruin this section!
 df_clean_single = df_master[df_master[selected_single_col] != ""]
 
 df_single = df_clean_single.groupby([selected_single_col]).agg(
