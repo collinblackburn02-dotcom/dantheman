@@ -71,7 +71,6 @@ df_master = load_data()
 # ================ Sidebar & Global Controls =================
 with st.sidebar:
     st.header("Global Controls")
-    # NEW: Rev/Visitor takes the top spot!
     metric_choice = st.radio("Primary Metric", ["Rev/Visitor", "Conv %", "Revenue", "Purchases", "Visitors"])
     min_visitors = st.number_input("Traffic Floor", value=250)
     st.markdown("---")
@@ -97,7 +96,8 @@ for i, (label, col_name) in enumerate(configs):
             c_title, c_inc = st.columns([3, 1])
             c_title.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
             
-            is_inc = c_inc.checkbox("Inc", value=(i<3), key=f"inc_{col_name}")
+            # FIX 1: value=False ensures the app loads with 0 boxes checked
+            is_inc = c_inc.checkbox("Inc", value=False, key=f"inc_{col_name}")
             valid_opts = sorted([x for x in df_master[col_name].unique() if x != ""])
             val = st.selectbox(f"Filter {label}", ["- All -"] + valid_opts, key=f"filter_{col_name}", label_visibility="collapsed")
             
@@ -116,7 +116,7 @@ metric_map = {
     "Purchases": "total_purchasers", 
     "Revenue": "total_revenue", 
     "Visitors": "total_visitors",
-    "Rev/Visitor": "Rev/Visitor" # Added to mapping
+    "Rev/Visitor": "Rev/Visitor"
 }
 
 if included_types and not dff.empty:
@@ -146,14 +146,13 @@ if included_types and not dff.empty:
             
             for col in included_types:
                 if col not in subset:
-                    grp[col] = ""
+                    grp[col] = "Any"
                     
             all_combos_dfs.append(grp)
             
     if all_combos_dfs:
         dff = pd.concat(all_combos_dfs, ignore_index=True)
         
-        # Calculate the metrics!
         dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
         dff['Rev/Visitor'] = (dff['total_revenue'] / dff['total_visitors']).round(2)
         
@@ -181,8 +180,35 @@ if included_types and not dff.empty:
             )
     else:
         st.warning("No data found for these combinations.")
+        
+# FIX 2: If no boxes are checked, show the grand total performance instead of an error message
 elif not included_types:
-    st.info("Please check at least one 'Inc' box to group your audience data.")
+    st.info("👆 Check the 'Inc' boxes above to break down your audience by specific traits.")
+    
+    total_vis = dff['total_visitors'].sum()
+    total_purch = dff['total_purchasers'].sum()
+    total_rev = dff['total_revenue'].sum()
+    
+    if total_vis >= min_visitors:
+        summary_df = pd.DataFrame([{
+            "Audience Segment": "All Traffic (Unfiltered)",
+            "Visitors": total_vis,
+            "Purchases": total_purch,
+            "Revenue": total_rev,
+            "Conv %": (total_purch / total_vis * 100).round(2) if total_vis > 0 else 0,
+            "Rev/Visitor": (total_rev / total_vis).round(2) if total_vis > 0 else 0
+        }])
+        
+        st.dataframe(
+            summary_df.style.format({
+                'Conv %': '{:.2f}%', 
+                'Revenue': '${:,.2f}',
+                'Rev/Visitor': '${:,.2f}'
+            }),
+            use_container_width=True
+        )
+    else:
+        st.warning(f"Total traffic ({total_vis}) is below your Traffic Floor minimum ({min_visitors}).")
 
 # ================ 3. NEW DYNAMIC LOGIC: Single Variable Deep Dive =================
 st.markdown("<hr>", unsafe_allow_html=True)
