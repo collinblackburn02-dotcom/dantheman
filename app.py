@@ -146,7 +146,7 @@ if included_types and not dff.empty:
             
             for col in included_types:
                 if col not in subset:
-                    grp[col] = "Any"
+                    grp[col] = ""
                     
             all_combos_dfs.append(grp)
             
