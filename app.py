@@ -120,7 +120,6 @@ for i, (label, col_name) in enumerate(configs):
             if val: selected_filters[col_name] = val
 
 # ================ 2. NEW DYNAMIC LOGIC: The Data Cube =================
-# Apply the global multi-select filters FIRST
 dff_filtered = df_master.copy()
 for col, vals in selected_filters.items():
     if col in dff_filtered.columns:
@@ -159,7 +158,6 @@ if included_types and not dff_filtered.empty:
                 total_revenue=('total_revenue', 'sum') 
             ).reset_index()
             
-            # THE FIX: Replace "Any" with completely blank cells for a cleaner look
             for col in included_types:
                 if col not in subset:
                     if col in selected_filters and selected_filters[col]:
@@ -171,6 +169,9 @@ if included_types and not dff_filtered.empty:
             
     if all_combos_dfs:
         dff_display = pd.concat(all_combos_dfs, ignore_index=True)
+        
+        # THE FIX: Drop the redundant combinations created by overlapping filters!
+        dff_display = dff_display.drop_duplicates(subset=included_types)
         
         dff_display['Conv %'] = (dff_display['total_purchasers'] / dff_display['total_visitors'] * 100).round(2)
         dff_display['Rev/Visitor'] = (dff_display['total_revenue'] / dff_display['total_visitors']).round(2)
@@ -256,7 +257,6 @@ for i, label in enumerate(single_var_options.keys()):
 selected_single_label = st.session_state.active_single_var
 selected_single_col = single_var_options[selected_single_label]
 
-# THE FIX: We pull directly from the unfiltered df_master here so the global filters above don't ruin this section!
 df_clean_single = df_master[df_master[selected_single_col] != ""]
 
 df_single = df_clean_single.groupby([selected_single_col]).agg(
