@@ -115,8 +115,13 @@ for col, val in selected_filters.items():
 
 metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
 
-# Step B: Group by whatever checkboxes are selected! (No more hardcoded combinations)
+# Step B: Group by whatever checkboxes are selected!
 if included_types and not dff.empty:
+    
+    # MAGIC LINES: Drop any row that has a blank in our checked columns
+    for col in included_types:
+        dff = dff[dff[col] != ""]
+
     dff = dff.groupby(included_types).agg(
         total_visitors=('total_visitors', 'sum'),
         total_purchasers=('total_purchasers', 'sum')
@@ -177,8 +182,11 @@ for i, label in enumerate(single_var_options.keys()):
 selected_single_label = st.session_state.active_single_var
 selected_single_col = single_var_options[selected_single_label]
 
+# MAGIC LINE: Drop blanks before we group the single variable
+df_clean_single = df_master[df_master[selected_single_col] != ""]
+
 # Dynamically group the flat table by the single selected variable
-df_single = df_master.groupby([selected_single_col]).agg(
+df_single = df_clean_single.groupby([selected_single_col]).agg(
     total_visitors=('total_visitors', 'sum'),
     total_purchasers=('total_purchasers', 'sum')
 ).reset_index()
