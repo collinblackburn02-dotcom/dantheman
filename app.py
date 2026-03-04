@@ -31,6 +31,8 @@ with st.sidebar:
     if st.button("Reset Filters"): st.rerun()
 
 st.title("🪵 Audience Insights Engine")
+
+# This maps the UI metric to the underlying data column for sorting
 metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Revenue": "total_revenue", "Visitors": "total_visitors", "Rev/Visitor": "Rev/Visitor"}
 
 # ================ 1. Single Variable Deep Dive =================
@@ -45,29 +47,37 @@ for i, label in enumerate(single_var_options.keys()):
         st.rerun()
 
 selected_col = single_var_options[st.session_state.active_single_var]
-df_single = df_master.groupby([selected_col]).agg(total_visitors=('total_visitors', 'sum'), total_purchasers=('total_purchasers', 'sum'), total_revenue=('total_revenue', 'sum')).reset_index()
+df_single = df_master.groupby([selected_col]).agg(
+    total_visitors=('total_visitors', 'sum'), 
+    total_purchasers=('total_purchasers', 'sum'), 
+    total_revenue=('total_revenue', 'sum')
+).reset_index()
 
 if not df_single.empty:
     df_single['Conv %'] = (df_single['total_purchasers'] / df_single['total_visitors'] * 100).round(2)
     df_single['Rev/Visitor'] = (df_single['total_revenue'] / df_single['total_visitors']).round(2)
     df_single = df_single[df_single['total_visitors'] >= min_visitors]
     
-    # --- LOGICAL SORTING ---
-    if selected_col == 'income':
-        sort_order = ['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+']
-        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=sort_order, ordered=True)
-    elif selected_col == 'net_worth':
-        sort_order = ['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+']
-        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=sort_order, ordered=True)
-    elif selected_col == 'credit_rating':
-        sort_order = ['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)']
-        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=sort_order, ordered=True)
-    
-    # Sort by either Category order or Metric
+    # Custom Sorting for Buckets
     is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
+    if selected_col == 'income':
+        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+'], ordered=True)
+    elif selected_col == 'net_worth':
+        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+'], ordered=True)
+    elif selected_col == 'credit_rating':
+        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)'], ordered=True)
+    
     df_single = df_single.sort_values(selected_col if is_bucketed else metric_map[metric_choice], ascending=not is_bucketed)
 
-    st.dataframe(df_single.style.format({'Conv %': '{:.2f}%', 'total_revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}), use_container_width=True)
+    # RESTORED: Renaming and Styling happening at the very end
+    display_df = df_single.rename(columns={
+        selected_col: st.session_state.active_single_var,
+        "total_visitors": "Visitors", 
+        "total_purchasers": "Purchases", 
+        "total_revenue": "Revenue"
+    })
+    
+    st.dataframe(display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), use_container_width=True)
 
 st.markdown("---")
 
@@ -82,7 +92,6 @@ for i, (label, col_name) in enumerate(configs):
         with st.container(border=True):
             is_inc = st.checkbox(f"Inc {label}", key=f"inc_{col_name}")
             opts = sorted(df_master[col_name].unique().tolist())
-            # Ensure filters match the logical bucket order
             if col_name == 'income': opts = ['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+']
             elif col_name == 'net_worth': opts = ['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+']
             elif col_name == 'credit_rating': opts = ['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)']
@@ -98,13 +107,28 @@ if included_types and not dff.empty:
     combos = []
     for r in range(1, min(3, len(included_types)) + 1):
         for subset in itertools.combinations(included_types, r):
-            grp = dff.groupby(list(subset)).agg(total_visitors=('total_visitors', 'sum'), total_purchasers=('total_purchasers', 'sum'), total_revenue=('total_revenue', 'sum')).reset_index()
+            grp = dff.groupby(list(subset)).agg(
+                total_visitors=('total_visitors', 'sum'), 
+                total_purchasers=('total_purchasers', 'sum'), 
+                total_revenue=('total_revenue', 'sum')
+            ).reset_index()
             combos.append(grp)
+            
     if combos:
         res = pd.concat(combos, ignore_index=True).drop_duplicates(subset=included_types).fillna("")
         res['Conv %'] = (res['total_purchasers'] / res['total_visitors'] * 100).round(2)
         res['Rev/Visitor'] = (res['total_revenue'] / res['total_visitors']).round(2)
-        st.dataframe(res[res['total_visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False), use_container_width=True)
+        res = res[res['total_visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False)
+        
+        # RESTORED: Renaming and Styling
+        display_res = res.rename(columns={
+            "gender": "Gender", "age": "Age", "income": "Income", "region": "Region", 
+            "net_worth": "Net Worth", "children": "Children", "marital_status": "Marital Status", 
+            "homeowner": "Homeowner", "credit_rating": "Credit Rating",
+            "total_visitors": "Visitors", "total_purchasers": "Purchases", "total_revenue": "Revenue"
+        })
+        
+        st.dataframe(display_res.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), use_container_width=True)
 
 # ================ 3. AI Data Agent =================
 st.markdown("---")
