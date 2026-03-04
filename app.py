@@ -4,6 +4,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import os
 import itertools 
+import re # <-- NEW: We need this to extract numbers from your text buckets!
 
 # ================ Brand palette & CSS =================
 BRAND = {
@@ -96,9 +97,20 @@ for i, (label, col_name) in enumerate(configs):
             c_title, c_inc = st.columns([3, 1])
             c_title.markdown(f'<p class="attr-title">{label}</p>', unsafe_allow_html=True)
             
-            # FIX 1: value=False ensures the app loads with 0 boxes checked
             is_inc = c_inc.checkbox("Inc", value=False, key=f"inc_{col_name}")
-            valid_opts = sorted([x for x in df_master[col_name].unique() if x != ""])
+            raw_opts = [x for x in df_master[col_name].unique() if x != ""]
+            
+            # NEW: Custom numerical sorting for Income and Net Worth (High to Low)
+            if col_name in ['income', 'net_worth']:
+                def extract_val(s):
+                    # Removes commas and finds the first number string (even if it's negative)
+                    nums = re.findall(r'-?\d+', s.replace(',', ''))
+                    return float(nums[0]) if nums else 0
+                
+                valid_opts = sorted(raw_opts, key=extract_val, reverse=True)
+            else:
+                valid_opts = sorted(raw_opts)
+                
             val = st.selectbox(f"Filter {label}", ["- All -"] + valid_opts, key=f"filter_{col_name}", label_visibility="collapsed")
             
             if is_inc: included_types.append(col_name)
@@ -181,7 +193,6 @@ if included_types and not dff.empty:
     else:
         st.warning("No data found for these combinations.")
         
-# FIX 2: If no boxes are checked, show the grand total performance instead of an error message
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes above to break down your audience by specific traits.")
     
