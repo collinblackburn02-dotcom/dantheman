@@ -3,6 +3,7 @@ import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import os
+import itertools 
 
 # ================ Brand palette & CSS =================
 BRAND = {
@@ -104,53 +105,79 @@ for i, (label, col_name) in enumerate(configs):
             if is_inc: included_types.append(col_name)
             if val != "- All -": selected_filters[col_name] = val
 
-# ================ 2. NEW DYNAMIC LOGIC: Main Combination Display =================
-# We start with the full flat table
+# ================ 2. NEW DYNAMIC LOGIC: The Data Cube =================
 dff = df_master.copy()
 
-# Step A: Apply the dropdown filters first (e.g., if they only want to look at CA)
 for col, val in selected_filters.items():
     if col in dff.columns:
         dff = dff[dff[col] == val]
 
 metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
 
-# Step B: Group by whatever checkboxes are selected!
 if included_types and not dff.empty:
+    all_combos_dfs = []
     
-    # MAGIC LINES: Drop any row that has a blank in our checked columns
-    for col in included_types:
-        dff = dff[dff[col] != ""]
-
-    dff = dff.groupby(included_types).agg(
-        total_visitors=('total_visitors', 'sum'),
-        total_purchasers=('total_purchasers', 'sum')
-    ).reset_index()
-
-    # Calculate Conv % dynamically
-    dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
+    # NEW: Cap the maximum depth of combinations at 3 to prevent lag
+    max_combo_size = min(3, len(included_types))
     
-    # Apply Traffic Floor
-    dff = dff[dff['total_visitors'] >= min_visitors]
-
-    if dff.empty:
-        st.warning("No data found for this combination, or it didn't meet the Traffic Floor minimum.")
+    if len(included_types) > 3:
+        st.info("💡 **Compute Saver Active:** You selected more than 3 variables. The table is automatically capping combination groups at a maximum of 3 to keep the dashboard lightning fast!")
+    
+    # Generates 1-way, 2-way, and up to 3-way combinations max
+    for r in range(1, max_combo_size + 1):
+        for subset in itertools.combinations(included_types, r):
+            subset = list(subset)
+            
+            temp_df = dff.copy()
+            
+            # Drop rows that are blank FOR THIS SPECIFIC COMBINATION ONLY
+            for col in subset:
+                temp_df = temp_df[temp_df[col] != ""]
+                
+            if temp_df.empty:
+                continue
+                
+            # Group and sum for this specific tier
+            grp = temp_df.groupby(subset).agg(
+                total_visitors=('total_visitors', 'sum'),
+                total_purchasers=('total_purchasers', 'sum')
+            ).reset_index()
+            
+            # Fill the remaining unchecked columns with "Any" so they stack neatly
+            for col in included_types:
+                if col not in subset:
+                    grp[col] = "Any"
+                    
+            all_combos_dfs.append(grp)
+            
+    if all_combos_dfs:
+        # Stack all the combinations into one master table!
+        dff = pd.concat(all_combos_dfs, ignore_index=True)
+        
+        # Calculate Conv %
+        dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
+        
+        # Apply Traffic Floor
+        dff = dff[dff['total_visitors'] >= min_visitors]
+        
+        if dff.empty:
+            st.warning("No combinations met the Traffic Floor minimum.")
+        else:
+            dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
+            dff.index += 1
+            
+            final_display_cols = included_types + ["total_visitors", "total_purchasers", "Conv %"]
+            
+            st.dataframe(
+                dff[final_display_cols].rename(columns={
+                    "gender": "Gender", "age": "Age", "income": "Income", 
+                    "state": "State", "net_worth": "Net Worth", "children": "Children", "credit_rating": "Credit Rating",
+                    "total_visitors": "Visitors", "total_purchasers": "Purchases"
+                }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
+                use_container_width=True
+            )
     else:
-        # Sort and clean index
-        dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
-        dff.index += 1
-        
-        # Prepare display columns
-        final_display_cols = included_types + ["total_visitors", "total_purchasers", "Conv %"]
-        
-        st.dataframe(
-            dff[final_display_cols].rename(columns={
-                "gender": "Gender", "age": "Age", "income": "Income", 
-                "state": "State", "net_worth": "Net Worth", "children": "Children", "credit_rating": "Credit Rating",
-                "total_visitors": "Visitors", "total_purchasers": "Purchases"
-            }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
-            use_container_width=True
-        )
+        st.warning("No data found for these combinations.")
 elif not included_types:
     st.info("Please check at least one 'Inc' box to group your audience data.")
 
@@ -182,7 +209,7 @@ for i, label in enumerate(single_var_options.keys()):
 selected_single_label = st.session_state.active_single_var
 selected_single_col = single_var_options[selected_single_label]
 
-# MAGIC LINE: Drop blanks before we group the single variable
+# Drop blanks before we group the single variable
 df_clean_single = df_master[df_master[selected_single_col] != ""]
 
 # Dynamically group the flat table by the single selected variable
