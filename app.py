@@ -22,7 +22,6 @@ def inject_css():
             [data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid rgba(140, 98, 57, 0.1); }}
             hr {{ border-top: 1px solid rgba(140, 98, 57, 0.2); margin-top: 2rem; margin-bottom: 2rem; }}
             
-            /* Custom styling for our new toggle buttons */
             div[data-testid="stButton"] button[kind="primary"] {{
                 background-color: {BRAND["accent"]};
                 color: white;
@@ -64,7 +63,6 @@ def get_bq_client():
 @st.cache_data(ttl=600)
 def load_data():
     client = get_bq_client()
-    # Pulling the new, flat, 1-row-per-visitor table
     df = client.query("SELECT * FROM `xenon-mantis-430216-n4.final_dashboard.demographic_leaderboard`").to_dataframe()
     return df.fillna("")
 
@@ -73,7 +71,8 @@ df_master = load_data()
 # ================ Sidebar & Global Controls =================
 with st.sidebar:
     st.header("Global Controls")
-    metric_choice = st.radio("Primary Metric", ["Conv %", "Purchases", "Visitors"])
+    # NEW: Rev/Visitor takes the top spot!
+    metric_choice = st.radio("Primary Metric", ["Rev/Visitor", "Conv %", "Revenue", "Purchases", "Visitors"])
     min_visitors = st.number_input("Traffic Floor", value=250)
     st.markdown("---")
     if st.button("Reset Filters"):
@@ -112,52 +111,52 @@ for col, val in selected_filters.items():
     if col in dff.columns:
         dff = dff[dff[col] == val]
 
-metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Visitors": "total_visitors"}
+metric_map = {
+    "Conv %": "Conv %", 
+    "Purchases": "total_purchasers", 
+    "Revenue": "total_revenue", 
+    "Visitors": "total_visitors",
+    "Rev/Visitor": "Rev/Visitor" # Added to mapping
+}
 
 if included_types and not dff.empty:
     all_combos_dfs = []
-    
-    # NEW: Cap the maximum depth of combinations at 3 to prevent lag
     max_combo_size = min(3, len(included_types))
     
     if len(included_types) > 3:
         st.info("💡 **Compute Saver Active:** You selected more than 3 variables. The table is automatically capping combination groups at a maximum of 3 to keep the dashboard lightning fast!")
     
-    # Generates 1-way, 2-way, and up to 3-way combinations max
     for r in range(1, max_combo_size + 1):
         for subset in itertools.combinations(included_types, r):
             subset = list(subset)
             
             temp_df = dff.copy()
             
-            # Drop rows that are blank FOR THIS SPECIFIC COMBINATION ONLY
             for col in subset:
                 temp_df = temp_df[temp_df[col] != ""]
                 
             if temp_df.empty:
                 continue
                 
-            # Group and sum for this specific tier
             grp = temp_df.groupby(subset).agg(
                 total_visitors=('total_visitors', 'sum'),
-                total_purchasers=('total_purchasers', 'sum')
+                total_purchasers=('total_purchasers', 'sum'),
+                total_revenue=('total_revenue', 'sum') 
             ).reset_index()
             
-            # Fill the remaining unchecked columns with "" so they stack neatly
             for col in included_types:
                 if col not in subset:
-                    grp[col] = ""
+                    grp[col] = "Any"
                     
             all_combos_dfs.append(grp)
             
     if all_combos_dfs:
-        # Stack all the combinations into one master table!
         dff = pd.concat(all_combos_dfs, ignore_index=True)
         
-        # Calculate Conv %
+        # Calculate the metrics!
         dff['Conv %'] = (dff['total_purchasers'] / dff['total_visitors'] * 100).round(2)
+        dff['Rev/Visitor'] = (dff['total_revenue'] / dff['total_visitors']).round(2)
         
-        # Apply Traffic Floor
         dff = dff[dff['total_visitors'] >= min_visitors]
         
         if dff.empty:
@@ -166,14 +165,18 @@ if included_types and not dff.empty:
             dff = dff.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
             dff.index += 1
             
-            final_display_cols = included_types + ["total_visitors", "total_purchasers", "Conv %"]
+            final_display_cols = included_types + ["total_visitors", "total_purchasers", "Conv %", "total_revenue", "Rev/Visitor"]
             
             st.dataframe(
                 dff[final_display_cols].rename(columns={
                     "gender": "Gender", "age": "Age", "income": "Income", 
                     "state": "State", "net_worth": "Net Worth", "children": "Children", "credit_rating": "Credit Rating",
-                    "total_visitors": "Visitors", "total_purchasers": "Purchases"
-                }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
+                    "total_visitors": "Visitors", "total_purchasers": "Purchases", "total_revenue": "Revenue"
+                }).style.format({
+                    'Conv %': '{:.2f}%', 
+                    'Revenue': '${:,.2f}',
+                    'Rev/Visitor': '${:,.2f}'
+                }).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'),
                 use_container_width=True
             )
     else:
@@ -181,7 +184,7 @@ if included_types and not dff.empty:
 elif not included_types:
     st.info("Please check at least one 'Inc' box to group your audience data.")
 
-# ================ 3. NEW DYNAMIC LOGIC: Single Variable Toggle Bar =================
+# ================ 3. NEW DYNAMIC LOGIC: Single Variable Deep Dive =================
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("🔍 Single Variable Deep Dive")
 
@@ -209,17 +212,18 @@ for i, label in enumerate(single_var_options.keys()):
 selected_single_label = st.session_state.active_single_var
 selected_single_col = single_var_options[selected_single_label]
 
-# Drop blanks before we group the single variable
 df_clean_single = df_master[df_master[selected_single_col] != ""]
 
-# Dynamically group the flat table by the single selected variable
 df_single = df_clean_single.groupby([selected_single_col]).agg(
     total_visitors=('total_visitors', 'sum'),
-    total_purchasers=('total_purchasers', 'sum')
+    total_purchasers=('total_purchasers', 'sum'),
+    total_revenue=('total_revenue', 'sum')
 ).reset_index()
 
 if not df_single.empty:
     df_single['Conv %'] = (df_single['total_purchasers'] / df_single['total_visitors'] * 100).round(2)
+    df_single['Rev/Visitor'] = (df_single['total_revenue'] / df_single['total_visitors']).round(2)
+    
     df_single = df_single[df_single['total_visitors'] >= min_visitors]
     
     if df_single.empty:
@@ -228,14 +232,19 @@ if not df_single.empty:
         df_single = df_single.sort_values(metric_map[metric_choice], ascending=False).reset_index(drop=True)
         df_single.index += 1
         
-        display_cols = [selected_single_col, "total_visitors", "total_purchasers", "Conv %"]
+        display_cols = [selected_single_col, "total_visitors", "total_purchasers", "Conv %", "total_revenue", "Rev/Visitor"]
         
         st.dataframe(
             df_single[display_cols].rename(columns={
                 selected_single_col: selected_single_label,
                 "total_visitors": "Visitors", 
-                "total_purchasers": "Purchases"
-            }).style.format({'Conv %': '{:.2f}%'}).background_gradient(subset=['Conv %'], cmap='YlGn'),
+                "total_purchasers": "Purchases",
+                "total_revenue": "Revenue"
+            }).style.format({
+                'Conv %': '{:.2f}%', 
+                'Revenue': '${:,.2f}',
+                'Rev/Visitor': '${:,.2f}'
+            }).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'),
             use_container_width=True
         )
 else:
