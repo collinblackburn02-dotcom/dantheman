@@ -3,7 +3,6 @@ import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import os
-import itertools 
 
 # ================ Setup =================
 st.set_page_config(page_title="Heavenly Insights", page_icon="🪵", layout="wide")
@@ -19,7 +18,9 @@ def get_bq_client():
 def load_data():
     client = get_bq_client()
     df = client.query("SELECT * FROM `xenon-mantis-430216-n4.final_dashboard.demographic_leaderboard`").to_dataframe()
-    return df.fillna("")
+    # Safely filter out U globally if desired, leaving M and F
+    df = df[df['gender'].isin(['M', 'F'])]
+    return df.fillna("Unknown")
 
 df_master = load_data()
 
@@ -31,9 +32,7 @@ with st.sidebar:
     if st.button("Reset Filters"): st.rerun()
 
 st.title("🪵 Audience Insights Engine")
-
-# This maps the UI metric to the underlying data column for sorting
-metric_map = {"Conv %": "Conv %", "Purchases": "total_purchasers", "Revenue": "total_revenue", "Visitors": "total_visitors", "Rev/Visitor": "Rev/Visitor"}
+metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue", "Visitors": "Visitors", "Rev/Visitor": "Rev/Visitor"}
 
 # ================ 1. Single Variable Deep Dive =================
 st.subheader("🔍 Single Variable Deep Dive")
@@ -47,18 +46,22 @@ for i, label in enumerate(single_var_options.keys()):
         st.rerun()
 
 selected_col = single_var_options[st.session_state.active_single_var]
-df_single = df_master.groupby([selected_col]).agg(
-    total_visitors=('total_visitors', 'sum'), 
-    total_purchasers=('total_purchasers', 'sum'), 
-    total_revenue=('total_revenue', 'sum')
+
+# Filter out "Unknown" ONLY for the variable we are looking at!
+df_clean_single = df_master[~df_master[selected_col].isin(["Unknown", ""])]
+
+df_single = df_clean_single.groupby([selected_col]).agg(
+    Visitors=('total_visitors', 'sum'), 
+    Purchases=('total_purchasers', 'sum'), 
+    Revenue=('total_revenue', 'sum')
 ).reset_index()
 
 if not df_single.empty:
-    df_single['Conv %'] = (df_single['total_purchasers'] / df_single['total_visitors'] * 100).round(2)
-    df_single['Rev/Visitor'] = (df_single['total_revenue'] / df_single['total_visitors']).round(2)
-    df_single = df_single[df_single['total_visitors'] >= min_visitors]
+    df_single['Conv %'] = (df_single['Purchases'] / df_single['Visitors'] * 100).round(2)
+    df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
+    df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    # Custom Sorting for Buckets
+    # Clean Categorical Sorting
     is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
     if selected_col == 'income':
         df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+'], ordered=True)
@@ -69,14 +72,7 @@ if not df_single.empty:
     
     df_single = df_single.sort_values(selected_col if is_bucketed else metric_map[metric_choice], ascending=not is_bucketed)
 
-    # RESTORED: Renaming and Styling happening at the very end
-    display_df = df_single.rename(columns={
-        selected_col: st.session_state.active_single_var,
-        "total_visitors": "Visitors", 
-        "total_purchasers": "Purchases", 
-        "total_revenue": "Revenue"
-    })
-    
+    display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     st.dataframe(display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), use_container_width=True)
 
 st.markdown("---")
@@ -91,10 +87,20 @@ for i, (label, col_name) in enumerate(configs):
     with filter_cols[i % 3]:
         with st.container(border=True):
             is_inc = st.checkbox(f"Inc {label}", key=f"inc_{col_name}")
-            opts = sorted(df_master[col_name].unique().tolist())
-            if col_name == 'income': opts = ['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+']
-            elif col_name == 'net_worth': opts = ['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+']
-            elif col_name == 'credit_rating': opts = ['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)']
+            
+            # Dynamically pull options, excluding "Unknown" from the dropdown list
+            opts = [x for x in df_master[col_name].unique() if x not in ["Unknown", ""]]
+            
+            # Sort the dropdowns logically
+            if col_name == 'income': sort_order = ['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+']
+            elif col_name == 'net_worth': sort_order = ['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+']
+            elif col_name == 'credit_rating': sort_order = ['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)']
+            else: sort_order = sorted(opts)
+            
+            if col_name in ['income', 'net_worth', 'credit_rating']:
+                opts = sorted(opts, key=lambda x: sort_order.index(x) if x in sort_order else 99)
+            else:
+                opts = sorted(opts)
 
             val = st.multiselect(f"Filter {label}", opts, key=f"f_{col_name}")
             if is_inc: included_types.append(col_name)
@@ -104,31 +110,26 @@ dff = df_master.copy()
 for col, vals in selected_filters.items(): dff = dff[dff[col].isin(vals)]
 
 if included_types and not dff.empty:
-    combos = []
-    for r in range(1, min(3, len(included_types)) + 1):
-        for subset in itertools.combinations(included_types, r):
-            grp = dff.groupby(list(subset)).agg(
-                total_visitors=('total_visitors', 'sum'), 
-                total_purchasers=('total_purchasers', 'sum'), 
-                total_revenue=('total_revenue', 'sum')
-            ).reset_index()
-            combos.append(grp)
-            
-    if combos:
-        res = pd.concat(combos, ignore_index=True).drop_duplicates(subset=included_types).fillna("")
-        res['Conv %'] = (res['total_purchasers'] / res['total_visitors'] * 100).round(2)
-        res['Rev/Visitor'] = (res['total_revenue'] / res['total_visitors']).round(2)
-        res = res[res['total_visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False)
-        
-        # RESTORED: Renaming and Styling
-        display_res = res.rename(columns={
-            "gender": "Gender", "age": "Age", "income": "Income", "region": "Region", 
-            "net_worth": "Net Worth", "children": "Children", "marital_status": "Marital Status", 
-            "homeowner": "Homeowner", "credit_rating": "Credit Rating",
-            "total_visitors": "Visitors", "total_purchasers": "Purchases", "total_revenue": "Revenue"
-        })
-        
-        st.dataframe(display_res.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), use_container_width=True)
+    # THE FIX: We only group by exactly what you selected. No more confusing blank subset rows.
+    grp = dff.groupby(included_types).agg(
+        Visitors=('total_visitors', 'sum'), 
+        Purchases=('total_purchasers', 'sum'), 
+        Revenue=('total_revenue', 'sum')
+    ).reset_index()
+    
+    # Filter out combinations that have 'Unknown' in ANY of the specifically checked columns
+    for col in included_types:
+        grp = grp[grp[col] != 'Unknown']
+
+    grp['Conv %'] = (grp['Purchases'] / grp['Visitors'] * 100).round(2)
+    grp['Rev/Visitor'] = (grp['Revenue'] / grp['Visitors']).round(2)
+    
+    # Apply Traffic Floor and sort
+    final_res = grp[grp['Visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False)
+    
+    rename_dict = {"gender": "Gender", "age": "Age", "income": "Income", "region": "Region", "net_worth": "Net Worth", "children": "Children", "marital_status": "Marital Status", "homeowner": "Homeowner", "credit_rating": "Credit Rating"}
+    
+    st.dataframe(final_res.rename(columns=rename_dict).style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), use_container_width=True)
 
 # ================ 3. AI Data Agent =================
 st.markdown("---")
