@@ -64,7 +64,12 @@ def get_bq_client():
 @st.cache_data(ttl=600)
 def load_data():
     client = get_bq_client()
+    # Pull the updated table that includes the 'region' column
     df = client.query("SELECT * FROM `xenon-mantis-430216-n4.final_dashboard.demographic_leaderboard`").to_dataframe()
+    
+    # FILTER: Remove 'U' from Gender at the source to keep all charts clean
+    df = df[df['gender'].isin(['M', 'F'])]
+    
     return df.fillna("")
 
 df_master = load_data()
@@ -82,9 +87,10 @@ st.title("🪵 Audience Insights Engine")
 
 # ================ 1. UI: Checkboxes and Dropdowns =================
 cols = st.columns(3)
+# Swapped 'state' for 'region'
 configs = [
     ("Gender", "gender"), ("Age", "age"), ("Income", "income"),
-    ("State", "state"), ("Net Worth", "net_worth"), ("Children", "children"),
+    ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"),
     ("Credit Rating", "credit_rating")
 ]
 
@@ -119,7 +125,7 @@ for i, (label, col_name) in enumerate(configs):
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
-# ================ 2. NEW DYNAMIC LOGIC: The Data Cube =================
+# ================ 2. DYNAMIC LOGIC: The Data Cube =================
 dff_filtered = df_master.copy()
 for col, vals in selected_filters.items():
     if col in dff_filtered.columns:
@@ -135,15 +141,15 @@ metric_map = {
 
 if included_types and not dff_filtered.empty:
     all_combos_dfs = []
+    # Stick with 3 variable maximum as requested
     max_combo_size = min(3, len(included_types))
     
     if len(included_types) > 3:
-        st.info("💡 **Compute Saver Active:** You selected more than 3 variables. The table is capping combination groups at a maximum of 3.")
+        st.info("💡 **Compute Saver Active:** Combination groups are capped at a maximum of 3 variables.")
     
     for r in range(1, max_combo_size + 1):
         for subset in itertools.combinations(included_types, r):
             subset = list(subset)
-            
             temp_df = dff_filtered.copy()
             
             for col in subset:
@@ -169,8 +175,6 @@ if included_types and not dff_filtered.empty:
             
     if all_combos_dfs:
         dff_display = pd.concat(all_combos_dfs, ignore_index=True)
-        
-        # THE FIX: Drop the redundant combinations created by overlapping filters!
         dff_display = dff_display.drop_duplicates(subset=included_types)
         
         dff_display['Conv %'] = (dff_display['total_purchasers'] / dff_display['total_visitors'] * 100).round(2)
@@ -186,12 +190,16 @@ if included_types and not dff_filtered.empty:
             
             final_display_cols = included_types + ["total_visitors", "total_purchasers", "Conv %", "total_revenue", "Rev/Visitor"]
             
+            # Updated renaming dictionary to include Region
+            rename_dict = {
+                "gender": "Gender", "age": "Age", "income": "Income", 
+                "region": "Region", "net_worth": "Net Worth", 
+                "children": "Children", "credit_rating": "Credit Rating",
+                "total_visitors": "Visitors", "total_purchasers": "Purchases", "total_revenue": "Revenue"
+            }
+            
             st.dataframe(
-                dff_display[final_display_cols].rename(columns={
-                    "gender": "Gender", "age": "Age", "income": "Income", 
-                    "state": "State", "net_worth": "Net Worth", "children": "Children", "credit_rating": "Credit Rating",
-                    "total_visitors": "Visitors", "total_purchasers": "Purchases", "total_revenue": "Revenue"
-                }).style.format({
+                dff_display[final_display_cols].rename(columns=rename_dict).style.format({
                     'Conv %': '{:.2f}%', 
                     'Revenue': '${:,.2f}',
                     'Rev/Visitor': '${:,.2f}'
@@ -229,15 +237,16 @@ elif not included_types:
     else:
         st.warning(f"Total traffic ({total_vis}) is below your Traffic Floor minimum ({min_visitors}).")
 
-# ================ 3. NEW DYNAMIC LOGIC: Single Variable Deep Dive =================
+# ================ 3. Single Variable Deep Dive =================
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("🔍 Single Variable Deep Dive")
 
+# Swapped State for Region
 single_var_options = {
     "Gender": "gender",
     "Age": "age",
     "Income": "income",
-    "State": "state",
+    "Region": "region",
     "Net Worth": "net_worth",
     "Children": "children",
     "Credit Rating": "credit_rating"
@@ -306,7 +315,7 @@ else:
     from langchain_google_genai import ChatGoogleGenerativeAI
     
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash", 
+        model="gemini-2.0-flash", # Updated to current production stable
         google_api_key=st.secrets["GEMINI_API_KEY"]
     )
     
