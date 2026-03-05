@@ -15,7 +15,15 @@ def apply_custom_theme():
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
             html, body, [class*="css"] { font-family: 'Outfit', sans-serif; }
             .stApp { background-color: #F9F7F3; }
-            [data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E2D7C8; }
+            
+            /* === SLIMMER SIDEBAR === */
+            [data-testid="stSidebar"] { 
+                background-color: #FFFFFF; 
+                border-right: 1px solid #E2D7C8; 
+                min-width: 275px !important; 
+                max-width: 275px !important; 
+            }
+            
             h1, h2, h3 { color: #2D2421 !important; font-weight: 600 !important; }
             p, span, label, .stRadio label { color: #2D2421 !important; }
             
@@ -99,12 +107,15 @@ def apply_custom_theme():
                 vertical-align: middle !important;
                 white-space: nowrap !important;
             }
+            
+            /* Bold first column for standard tables */
             .premium-table-container table tbody tr td:first-child,
             .premium-table-container table tbody tr th:first-child {
                 font-weight: 700 !important;
                 color: #2D2421 !important;
                 text-align: center !important; 
             }
+            
             .premium-table-container tr:last-child td { border-bottom: none !important; }
             .premium-table-container tr:hover { opacity: 0.95; }
             
@@ -118,6 +129,12 @@ def apply_custom_theme():
             .matrix-container table td {
                 font-size: 0.65rem !important; 
                 padding: 6px 4px !important;
+            }
+            /* Override to un-bold the first column in the matrix */
+            .matrix-container table tbody tr td:first-child,
+            .matrix-container table tbody tr th:first-child {
+                font-weight: 400 !important; /* Normal text weight */
+                color: #3A2A26 !important; /* Match standard data color */
             }
         </style>
     """, unsafe_allow_html=True)
@@ -175,8 +192,8 @@ with st.sidebar:
     st.markdown("<br>", unsafe_allow_html=True)
     st.header("Global Controls")
     
-    # NEW: Sorting Toggle Slider
-    sort_order = st.select_slider("Ranking Order", options=["High to Low", "Low to High"], value="High to Low")
+    # NEW: Horizontal Radio Button for Ranking Order
+    sort_order = st.radio("Ranking Order", ["High to Low", "Low to High"], horizontal=True)
     is_ascending = (sort_order == "Low to High")
     
     metric_choice = st.radio("Primary Metric Leaderboard", ["Rev/Visitor", "Conv %", "Revenue", "Purchases", "Visitors"])
@@ -221,7 +238,6 @@ if not df_single.empty:
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    # Applied dynamic sorting
     df_single = df_single.sort_values(metric_map[metric_choice], ascending=is_ascending)
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
