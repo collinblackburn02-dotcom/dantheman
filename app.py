@@ -89,7 +89,7 @@ def apply_custom_theme():
                 padding: 12px 16px !important;
                 border-bottom: 1px solid #F0EAD6 !important;
                 color: #3A2A26 !important;
-                font-size: 0.95rem;
+                font-size: 0.70rem;
                 vertical-align: middle;
             }
             .premium-table-container tr:last-child td { border-bottom: none !important; }
