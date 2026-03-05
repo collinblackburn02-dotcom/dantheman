@@ -275,19 +275,25 @@ if "GEMINI_API_KEY" in st.secrets:
     
     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=st.secrets["GEMINI_API_KEY"])
     
-    # THE FIX: Added enforce_privacy and enable_cache to reduce API calls
+    # Enforce privacy so it doesn't send your raw customer rows to the API
     sdf = SmartDataframe(df_master, config={
-        "llm": llm,
+        "llm": llm, 
         "enforce_privacy": True, 
         "enable_cache": True
     })
     
-    if prompt := st.chat_input("Ask me about your audience..."):
+    st.info("💡 **Tip:** Ask specific data questions like 'What is the total revenue for Females?' (Avoid conversational greetings like 'Hi').")
+    
+    if prompt := st.chat_input("Ask me a specific question about your audience data..."):
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"): 
-            with st.spinner("Crunching data..."):
+            with st.spinner("Writing code to query your data..."):
                 try:
                     response = sdf.chat(prompt)
-                    st.markdown(response)
+                    # Safety net: If PandasAI returns nothing, tell the user gracefully.
+                    if response is None or str(response).strip() == "":
+                        st.warning("I couldn't calculate that. Try rephrasing your question to be more specific about the columns (e.g., 'Visitors', 'Revenue', 'Gender').")
+                    else:
+                        st.markdown(response)
                 except Exception as e:
-                    st.error(f"API Error: {e}")
+                    st.error(f"Error calculating data: {e}. If this persists, your Google API key may be out of quota.")
