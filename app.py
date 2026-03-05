@@ -59,25 +59,20 @@ def apply_custom_theme():
             .brand-subtitle { color: #B3845C; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
             
             /* === NEW: LUXURY HTML TABLE STYLING === */
-            .premium-table-container {
-                width: 100%;
-                overflow-x: auto;
-                border-radius: 12px;
-                border: 1px solid #E2D7C8;
-                box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
-                background: #FFFFFF;
-                margin-bottom: 1rem;
+        .premium-table-container table {
+                width: 100% !important; /* Forces the table to stretch the full width */
+                border-collapse: collapse;
+                font-family: 'Outfit', sans-serif;
             }
-       .premium-table-container th {
-                background-color: #F2EBE1 !important;
-                color: #9E6036 !important;
+            
+            /* ... keep your th and td padding CSS the same here ... */
+            
+            /* Bold & CENTER the first column */
+            .premium-table-container td:first-child {
                 font-weight: 700 !important;
-                text-align: center !important;
-                padding: 8px 10px !important; /* ULTRA COMPACT PADDING */
-                border-bottom: 2px solid #D5C6B3 !important;
-                text-transform: uppercase;
-                font-size: 0.65rem; /* TINY, CRISP HEADERS */
-                letter-spacing: 0.5px;
+                color: #2D2421 !important;
+                text-align: center !important; /* Changed from left to center */
+            
             }
             .premium-table-container td {
                 text-align: center !important;
