@@ -20,7 +20,6 @@ def get_bq_client():
 def load_data():
     client = get_bq_client()
     df = client.query("SELECT * FROM `xenon-mantis-430216-n4.final_dashboard.demographic_leaderboard`").to_dataframe()
-    # Map blanks to Unknown for safe filtering
     return df.fillna("Unknown").replace("", "Unknown")
 
 df_master = load_data()
@@ -48,7 +47,6 @@ for i, label in enumerate(single_var_options.keys()):
 
 selected_col = single_var_options[st.session_state.active_single_var]
 
-# Hide 'Unknown' only for the active variable
 df_clean_single = df_master[~df_master[selected_col].isin(['Unknown', 'U', ''])]
 
 df_single = df_clean_single.groupby([selected_col]).agg(
@@ -62,7 +60,6 @@ if not df_single.empty:
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    # Bucket Sorting
     is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
     if selected_col == 'income':
         df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+'], ordered=True)
@@ -80,6 +77,7 @@ st.markdown("---")
 
 # ================ 2. Multi-Variable Combination Analysis =================
 st.subheader("📊 Multi-Variable Combination Analysis")
+
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
 selected_filters, included_types = {}, []
 filter_cols = st.columns(3)
@@ -89,8 +87,8 @@ for i, (label, col_name) in enumerate(configs):
         with st.container(border=True):
             is_inc = st.checkbox(f"Inc {label}", key=f"inc_{col_name}")
             
-            # Clean Dropdowns
             opts = [x for x in df_master[col_name].unique() if x not in ['Unknown', 'U', '']]
+            
             if col_name == 'income': sort_order = ['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+']
             elif col_name == 'net_worth': sort_order = ['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+']
             elif col_name == 'credit_rating': sort_order = ['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)']
@@ -106,21 +104,17 @@ for i, (label, col_name) in enumerate(configs):
             if val: selected_filters[col_name] = val
 
 dff = df_master.copy()
-# Apply strict dropdown filters
 for col, vals in selected_filters.items(): 
     dff = dff[dff[col].isin(vals)]
 
 if included_types and not dff.empty:
     combos = []
-    # Limit combinations to 3 levels deep to prevent the app from freezing
     max_combo_size = min(3, len(included_types))
     
-    # THE RESTORED LOGIC: Loop through 1-variable, 2-variable, and 3-variable combinations
     for r in range(1, max_combo_size + 1):
         for subset in itertools.combinations(included_types, r):
             temp_df = dff.copy()
             
-            # Remove "Unknown" ONLY for the columns currently being grouped
             for col in subset:
                 temp_df = temp_df[~temp_df[col].isin(['Unknown', 'U', ''])]
                 
@@ -133,22 +127,27 @@ if included_types and not dff.empty:
                 Revenue=('total_revenue', 'sum')
             ).reset_index()
             
-            # Fill the non-active columns with a blank string so the table displays cleanly
+            # THE FIX: If a column is filtered, print that filter value in the table instead of leaving it blank!
             for col in included_types:
                 if col not in subset:
-                    grp[col] = ""
+                    if col in selected_filters and selected_filters[col]:
+                        grp[col] = ", ".join(selected_filters[col])
+                    else:
+                        grp[col] = ""
                     
             combos.append(grp)
             
     if combos:
         res = pd.concat(combos, ignore_index=True)
+        
+        # THE FIX: Drop the redundant duplicates created by printing the filter values
+        res = res.drop_duplicates(subset=included_types)
+        
         res['Conv %'] = (res['Purchases'] / res['Visitors'] * 100).round(2)
         res['Rev/Visitor'] = (res['Revenue'] / res['Visitors']).round(2)
         
-        # Filter by Traffic Floor and Sort
         final_res = res[res['Visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False)
         
-        # Order the columns so the traits come first, metrics come last
         metrics = ["Visitors", "Purchases", "Revenue", "Conv %", "Rev/Visitor"]
         ordered_cols = included_types + metrics
         
