@@ -24,7 +24,7 @@ def load_data():
 
 df_master = load_data()
 
-# Bulletproof Sorting Maps
+# Maps for clean Dropdown sorting
 INCOME_MAP = {'$0-$59,999': 1, '$60,000-$99,999': 2, '$100,000-$199,999': 3, '$200,000+': 4}
 NET_WORTH_MAP = {'$49,999 and below': 1, '$50,000-$99,999': 2, '$100,000-$249,999': 3, '$250,000-$499,999': 4, '$500,000-$999,999': 5, '$1,000,000+': 6}
 CREDIT_MAP = {'High (A, B, C)': 1, 'Medium (D, E)': 2, 'Low (F, G)': 3}
@@ -65,23 +65,11 @@ if not df_single.empty:
     df_single['Conv %'] = (df_single['Purchases'] / df_single['Visitors'] * 100).round(2)
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     
-    # Applies the Global Traffic Floor from the sidebar
+    # Applies Traffic Floor
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    # Custom Categorical Sorting
-    is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
-    if selected_col == 'income':
-        df_single['_sort'] = df_single[selected_col].map(INCOME_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    elif selected_col == 'net_worth':
-        df_single['_sort'] = df_single[selected_col].map(NET_WORTH_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    elif selected_col == 'credit_rating':
-        df_single['_sort'] = df_single[selected_col].map(CREDIT_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    else:
-        # Applies the Global Metric sort from the sidebar
-        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
+    # THE FIX: Strictly sort by the chosen Primary Metric, highest to lowest.
+    df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
     
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
@@ -109,6 +97,7 @@ for i, (label, col_name) in enumerate(configs):
             
             opts = [x for x in df_master[col_name].unique() if x not in ['Unknown', 'U', '']]
             
+            # Keep the logical sorting just for the UI dropdown menus
             if col_name == 'income': opts = sorted(opts, key=lambda x: INCOME_MAP.get(x, 99))
             elif col_name == 'net_worth': opts = sorted(opts, key=lambda x: NET_WORTH_MAP.get(x, 99))
             elif col_name == 'credit_rating': opts = sorted(opts, key=lambda x: CREDIT_MAP.get(x, 99))
