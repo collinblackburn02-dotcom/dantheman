@@ -60,6 +60,7 @@ if not df_single.empty:
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
+    # Custom Categorical Sorting
     is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
     if selected_col == 'income':
         df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+'], ordered=True)
@@ -68,10 +69,20 @@ if not df_single.empty:
     elif selected_col == 'credit_rating':
         df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)'], ordered=True)
     
-    df_single = df_single.sort_values(selected_col if is_bucketed else metric_map[metric_choice], ascending=not is_bucketed)
+    # THE FIX: Proper sorting logic
+    if is_bucketed:
+        df_single = df_single.sort_values(selected_col, ascending=True)
+    else:
+        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
     
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
-    st.dataframe(display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), use_container_width=True)
+    
+    # THE FIX: Added hide_index=True to remove the 0/1 column
+    st.dataframe(
+        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), 
+        use_container_width=True,
+        hide_index=True 
+    )
 
 st.markdown("---")
 
@@ -127,7 +138,6 @@ if included_types and not dff.empty:
                 Revenue=('total_revenue', 'sum')
             ).reset_index()
             
-            # THE FIX: If a column is filtered, print that filter value in the table instead of leaving it blank!
             for col in included_types:
                 if col not in subset:
                     if col in selected_filters and selected_filters[col]:
@@ -139,8 +149,6 @@ if included_types and not dff.empty:
             
     if combos:
         res = pd.concat(combos, ignore_index=True)
-        
-        # THE FIX: Drop the redundant duplicates created by printing the filter values
         res = res.drop_duplicates(subset=included_types)
         
         res['Conv %'] = (res['Purchases'] / res['Visitors'] * 100).round(2)
@@ -156,9 +164,11 @@ if included_types and not dff.empty:
         if final_res.empty:
             st.warning(f"No combinations met the Traffic Floor minimum of {min_visitors}.")
         else:
+            # THE FIX: Added hide_index=True to the Multi-Variable table as well
             st.dataframe(
                 final_res[ordered_cols].rename(columns=rename_dict).style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), 
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
