@@ -58,40 +58,57 @@ def apply_custom_theme():
             .brand-header { font-size: 1.4rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
             .brand-subtitle { color: #B3845C; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
             
-            /* === NEW: LUXURY HTML TABLE STYLING === */
-        .premium-table-container table {
-                width: 100% !important; /* Forces the table to stretch the full width */
-                border-collapse: collapse;
-                font-family: 'Outfit', sans-serif;
+        /* === NEW: LUXURY HTML TABLE STYLING === */
+            .premium-table-container {
+                width: 100%;
+                overflow-x: auto;
+                border-radius: 12px;
+                border: 1px solid #E2D7C8;
+                box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
+                background: #FFFFFF;
+                margin-bottom: 1rem;
+            }
+            .premium-table-container table {
+                width: 100% !important; /* Stretches table to fit screen */
+                border-collapse: collapse !important;
+                font-family: 'Outfit', sans-serif !important;
             }
             
-            /* ... keep your th and td padding CSS the same here ... */
-            
-            /* Bold & CENTER the first column */
-            .premium-table-container td:first-child {
+            /* Bulletproof Header Targeting */
+            .premium-table-container table thead tr th,
+            .premium-table-container table th {
+                background-color: #F2EBE1 !important; /* Restores the missing Tan background */
+                color: #9E6036 !important;
                 font-weight: 700 !important;
-                color: #2D2421 !important;
-                text-align: center !important; /* Changed from left to center */
-            
+                text-align: center !important; /* Centers Headers */
+                padding: 12px 14px !important; /* Increased padding for breathing room */
+                border-bottom: 2px solid #D5C6B3 !important;
+                text-transform: uppercase !important;
+                font-size: 0.70rem !important;
+                letter-spacing: 0.5px !important;
             }
-            .premium-table-container td {
-                text-align: center !important;
-                padding: 6px 10px !important; /* ULTRA COMPACT ROW HEIGHT */
+            
+            /* Bulletproof Data Row Targeting */
+            .premium-table-container table tbody tr td,
+            .premium-table-container table td {
+                text-align: center !important; /* Centers all standard data */
+                padding: 10px 14px !important; /* Increased padding for breathing room */
                 border-bottom: 1px solid #F0EAD6 !important;
                 color: #3A2A26 !important;
-                font-size: 0.75rem; /* SMALLER TEXT */
-                vertical-align: middle;
-    
+                font-size: 0.80rem !important;
+                vertical-align: middle !important;
             }
-            .premium-table-container tr:last-child td { border-bottom: none !important; }
-            .premium-table-container tr:hover { opacity: 0.95; }
             
-            /* Bold & Left-Align the first column to anchor the data */
-            .premium-table-container td:first-child {
+            /* Bold the First Column, but keep it CENTERED */
+            .premium-table-container table tbody tr td:first-child,
+            .premium-table-container table tbody tr th:first-child {
                 font-weight: 700 !important;
                 color: #2D2421 !important;
-                text-align: left !important;
+                text-align: center !important; /* Centers the Left Column */
             }
+            
+            .premium-table-container tr:last-child td { border-bottom: none !important; }
+            .premium-table-container tr:hover { opacity: 0.95; }
         </style>
     """, unsafe_allow_html=True)
 
