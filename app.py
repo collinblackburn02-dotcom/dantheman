@@ -60,9 +60,12 @@ def apply_custom_theme():
 
 apply_custom_theme()
 
-# Premium Custom Colormaps
+# Premium Custom Colormaps (Reversed the Tan so the lowest conversion gets the darkest brown)
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
-custom_tan = mcolors.LinearSegmentedColormap.from_list("custom_tan", ["#F9F7F3", "#E2D7C8", "#B3845C"])
+custom_tan_reversed = mcolors.LinearSegmentedColormap.from_list("custom_tan_r", ["#B3845C", "#E2D7C8", "#F9F7F3"])
+
+# Reference String for Regions
+REGION_INFO = "📍 **Region Breakdown:** **Northeast:** CT, ME, MA, NH, RI, VT, NJ, NY, PA | **Midwest:** IL, IN, IA, KS, MI, MN, MO, NE, ND, OH, SD, WI | **South:** AL, AR, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV, DC | **West:** AK, AZ, CA, CO, HI, ID, MT, NV, NM, OR, UT, WA, WY"
 
 # ================ 2. Data Connection =================
 @st.cache_resource
@@ -108,7 +111,6 @@ st.markdown('<p class="brand-subtitle">Powered by Heavenly Heat Data Infrastruct
 
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
 
-
 # ================ 4. Single Variable Deep Dive (TOP) =================
 st.subheader("🔍 Single Variable Deep Dive")
 
@@ -118,6 +120,10 @@ for i, (label, col_name) in enumerate(configs):
     if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_single_var == label else "secondary", use_container_width=True):
         st.session_state.active_single_var = label
         st.rerun()
+
+# Dynamic Region Note
+if st.session_state.active_single_var == "Region":
+    st.info(REGION_INFO)
 
 selected_col = dict(configs)[st.session_state.active_single_var]
 
@@ -183,13 +189,13 @@ for label, col_name in configs:
 if predictive_data:
     pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=False)
     
-    # Prettier styling: Green for top/swing, Custom Tan for worst
+    # Prettier styling: Custom Tan Reversed maps lowest numbers to dark brown
     styled_pred = pred_df.style.format({
         'Conv % (Top)': '{:.2f}%',
         'Conv % (Worst)': '{:.2f}%',
         'Predictive Swing': '{:.2f}%'
     }).background_gradient(subset=['Predictive Swing', 'Conv % (Top)'], cmap=custom_light_green) \
-      .background_gradient(subset=['Conv % (Worst)'], cmap=custom_tan)
+      .background_gradient(subset=['Conv % (Worst)'], cmap=custom_tan_reversed)
       
     st.dataframe(styled_pred, use_container_width=True, hide_index=True)
 else:
@@ -223,6 +229,10 @@ with st.expander("🎛️ Combination Filters", expanded=True):
             
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
+
+# Dynamic Region Note for Multi-Variable Matrix
+if "region" in included_types:
+    st.info(REGION_INFO)
 
 # Filter data for KPI blocks and Combination Matrix
 dff_matrix = df_master.copy()
