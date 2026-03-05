@@ -66,7 +66,7 @@ def apply_custom_theme():
                 border: 1px solid #E2D7C8;
                 box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
                 background: #FFFFFF;
-                margin-bottom: 1rem;
+                margin-bottom: .1rem;
             }
             .premium-table-container table {
                 width: 100% !important;
