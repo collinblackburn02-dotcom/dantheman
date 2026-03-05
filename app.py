@@ -11,113 +11,22 @@ st.set_page_config(page_title="Heavenly Heat | Insights", page_icon="🪵", layo
 def apply_custom_theme():
     st.markdown("""
         <style>
-            /* Import premium typography */
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
-
-            html, body, [class*="css"] {
-                font-family: 'Outfit', sans-serif;
-            }
-
-            /* Main Backgrounds */
-            .stApp {
-                background-color: #F9F7F3; /* Warm Linen */
-            }
-            [data-testid="stSidebar"] {
-                background-color: #FFFFFF;
-                border-right: 1px solid #E2D7C8;
-            }
-
-            /* Typography */
-            h1, h2, h3 {
-                color: #2D2421 !important; /* Espresso */
-                font-weight: 600 !important;
-            }
-            p, span, label, .stRadio label {
-                color: #2D2421 !important;
-            }
-
-            /* Top KPI Metric Cards */
-            [data-testid="stMetric"] {
-                background-color: #FFFFFF;
-                border: 1px solid #E2D7C8;
-                border-radius: 12px;
-                padding: 20px 24px;
-                box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
-            }
-            [data-testid="stMetricLabel"] {
-                color: #9E6036 !important; /* Hemlock/Cedar Accent */
-                font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                font-size: 0.85rem;
-            }
-            [data-testid="stMetricValue"] {
-                color: #2D2421 !important;
-                font-weight: 700;
-                font-size: 2.2rem;
-            }
-
-            /* Sleek Buttons */
-            div[data-testid="stButton"] button {
-                border-radius: 8px;
-                font-weight: 600;
-                transition: all 0.2s ease-in-out;
-            }
-            div[data-testid="stButton"] button[kind="primary"] {
-                background-color: #9E6036;
-                color: #FFFFFF;
-                border: none;
-                box-shadow: 0 4px 6px rgba(158, 96, 54, 0.2);
-            }
-            div[data-testid="stButton"] button[kind="primary"]:hover {
-                background-color: #824D2A;
-                box-shadow: 0 6px 10px rgba(158, 96, 54, 0.3);
-            }
-            div[data-testid="stButton"] button[kind="secondary"] {
-                background-color: #FFFFFF;
-                color: #2D2421;
-                border: 1px solid #E2D7C8;
-            }
-            div[data-testid="stButton"] button[kind="secondary"]:hover {
-                border-color: #9E6036;
-                color: #9E6036;
-            }
-
-            /* Expander/Container styling */
-            [data-testid="stExpander"], .st-emotion-cache-1z1q1o0 {
-                border: 1px solid #E2D7C8 !important;
-                border-radius: 12px !important;
-                background: #FFFFFF;
-                box-shadow: 0 2px 4px rgba(45, 36, 33, 0.02);
-            }
-
-            /* Dataframes */
-            .stDataFrame {
-                border: 1px solid #E2D7C8;
-                border-radius: 12px;
-                overflow: hidden;
-            }
-            
-            hr {
-                border-top: 1px solid rgba(158, 96, 54, 0.2);
-                margin-top: 2rem;
-                margin-bottom: 2rem;
-            }
-            
-            .brand-header {
-                font-size: 2.5rem;
-                font-weight: 700;
-                color: #2D2421;
-                margin-bottom: 0px;
-                padding-bottom: 0px;
-            }
-            .brand-subtitle {
-                color: #9E6036;
-                font-weight: 500;
-                font-size: 1.1rem;
-                margin-top: -5px;
-                margin-bottom: 30px;
-            }
+            html, body, [class*="css"] { font-family: 'Outfit', sans-serif; }
+            .stApp { background-color: #F9F7F3; }
+            [data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E2D7C8; }
+            h1, h2, h3 { color: #2D2421 !important; font-weight: 600 !important; }
+            p, span, label, .stRadio label { color: #2D2421 !important; }
+            div[data-testid="stButton"] button { border-radius: 8px; font-weight: 600; transition: all 0.2s ease-in-out; }
+            div[data-testid="stButton"] button[kind="primary"] { background-color: #9E6036; color: #FFFFFF; border: none; box-shadow: 0 4px 6px rgba(158, 96, 54, 0.2); }
+            div[data-testid="stButton"] button[kind="primary"]:hover { background-color: #824D2A; box-shadow: 0 6px 10px rgba(158, 96, 54, 0.3); }
+            div[data-testid="stButton"] button[kind="secondary"] { background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }
+            div[data-testid="stButton"] button[kind="secondary"]:hover { border-color: #9E6036; color: #9E6036; }
+            [data-testid="stExpander"], .st-emotion-cache-1z1q1o0 { border: 1px solid #E2D7C8 !important; border-radius: 12px !important; background: #FFFFFF; box-shadow: 0 2px 4px rgba(45, 36, 33, 0.02); }
+            .stDataFrame { border: 1px solid #E2D7C8; border-radius: 12px; overflow: hidden; }
+            hr { border-top: 1px solid rgba(158, 96, 54, 0.2); margin-top: 2rem; margin-bottom: 2rem; }
+            .brand-header { font-size: 2.5rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
+            .brand-subtitle { color: #9E6036; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -139,14 +48,12 @@ def load_data():
 
 df_master = load_data()
 
-# Maps for clean Dropdown sorting
 INCOME_MAP = {'$0-$59,999': 1, '$60,000-$99,999': 2, '$100,000-$199,999': 3, '$200,000+': 4}
 NET_WORTH_MAP = {'$49,999 and below': 1, '$50,000-$99,999': 2, '$100,000-$249,999': 3, '$250,000-$499,999': 4, '$500,000-$999,999': 5, '$1,000,000+': 6}
 CREDIT_MAP = {'High (A, B, C)': 1, 'Medium (D, E)': 2, 'Low (F, G)': 3}
 
-# ================ 3. True Global Controls (Sidebar) =================
+# ================ 3. Global Controls (Left Sidebar) =================
 with st.sidebar:
-    # Look for local logo, otherwise render styled text
     if os.path.exists("logo.png"):
         st.image("logo.png", use_container_width=True)
     else:
@@ -156,7 +63,7 @@ with st.sidebar:
     st.markdown("<br>", unsafe_allow_html=True)
     st.header("Global Controls")
     metric_choice = st.radio("Primary Metric Leaderboard", ["Rev/Visitor", "Conv %", "Revenue", "Purchases", "Visitors"])
-    min_visitors = st.number_input("Minimum Traffic Floor", value=250, help="Hide rows with fewer visitors than this number to ensure statistical relevance.")
+    min_visitors = st.number_input("Minimum Traffic Floor", value=250)
     
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("Reset All Filters", use_container_width=True): 
@@ -168,9 +75,64 @@ metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue"
 st.markdown('<p class="brand-header">Audience Insights Engine</p>', unsafe_allow_html=True)
 st.markdown('<p class="brand-subtitle">Powered by Heavenly Heat Data Infrastructure</p>', unsafe_allow_html=True)
 
-# ================ 4. Master Audience Filters =================
-with st.expander("🎛️ Master Audience Segmentation Controls", expanded=True):
-    st.markdown("<p style='font-size: 0.9rem; color: #666;'>Filters applied here will instantly calculate totals below and update all data tables.</p>", unsafe_allow_html=True)
+# ================ 4. Single Variable Deep Dive (AT THE TOP) =================
+st.subheader("🔍 Single Variable Deep Dive")
+single_var_options = {"Gender": "gender", "Age": "age", "Income": "income", "Region": "region", "Net Worth": "net_worth", "Children": "children", "Marital Status": "marital_status", "Homeowner": "homeowner", "Credit Rating": "credit_rating"}
+
+if "active_single_var" not in st.session_state: st.session_state.active_single_var = "Gender"
+var_cols = st.columns(len(single_var_options))
+for i, label in enumerate(single_var_options.keys()):
+    if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_single_var == label else "secondary", use_container_width=True):
+        st.session_state.active_single_var = label
+        st.rerun()
+
+selected_col = single_var_options[st.session_state.active_single_var]
+
+# THIS USES THE RAW MASTER DATA (No multi-variable filters apply here)
+df_clean_single = df_master[~df_master[selected_col].isin(['Unknown', 'U', ''])]
+
+df_single = df_clean_single.groupby([selected_col]).agg(
+    Visitors=('total_visitors', 'sum'), 
+    Purchases=('total_purchasers', 'sum'), 
+    Revenue=('total_revenue', 'sum')
+).reset_index()
+
+if not df_single.empty:
+    df_single['Conv %'] = (df_single['Purchases'] / df_single['Visitors'] * 100).round(2)
+    df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
+    df_single = df_single[df_single['Visitors'] >= min_visitors]
+    
+    # Clean Categorical Sorting based on Sidebar Metric
+    is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
+    if selected_col == 'income':
+        df_single['_sort'] = df_single[selected_col].map(INCOME_MAP)
+        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
+    elif selected_col == 'net_worth':
+        df_single['_sort'] = df_single[selected_col].map(NET_WORTH_MAP)
+        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
+    elif selected_col == 'credit_rating':
+        df_single['_sort'] = df_single[selected_col].map(CREDIT_MAP)
+        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
+    else:
+        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
+    
+    display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
+    
+    st.dataframe(
+        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='Oranges'), 
+        use_container_width=True, 
+        hide_index=True
+    )
+else:
+    st.info("No data available for this variable with the current traffic floor.")
+
+st.markdown("<hr>", unsafe_allow_html=True)
+
+# ================ 5. Multi-Variable Combination Analysis (BOTTOM) =================
+st.subheader("📊 Multi-Variable Combination Matrix")
+
+with st.expander("🎛️ Combination Filters", expanded=True):
+    st.markdown("<p style='font-size: 0.9rem; color: #666;'>Filters applied here ONLY affect the Combination Matrix below.</p>", unsafe_allow_html=True)
     
     configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
     selected_filters, included_types = {}, []
@@ -178,7 +140,6 @@ with st.expander("🎛️ Master Audience Segmentation Controls", expanded=True)
 
     for i, (label, col_name) in enumerate(configs):
         with filter_cols[i % 3]:
-            # The UI Container for each filter block
             c_title, c_inc = st.columns([3, 1])
             c_title.markdown(f'<p style="font-weight: 600; color: #9E6036; margin-bottom: 0;">{label}</p>', unsafe_allow_html=True)
             is_inc = c_inc.checkbox("Inc", key=f"inc_{col_name}", help=f"Include {label} in Combination Matrix")
@@ -195,80 +156,10 @@ with st.expander("🎛️ Master Audience Segmentation Controls", expanded=True)
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
-# GLOBAL FILTER APPLICATION
+# DFF is created here, specifically for the combination matrix
 dff = df_master.copy()
 for col, vals in selected_filters.items(): 
     dff = dff[dff[col].isin(vals)]
-
-# ================ 5. Top KPI Dashboard =================
-total_vis = dff['total_visitors'].sum()
-total_purch = dff['total_purchasers'].sum()
-total_rev = dff['total_revenue'].sum()
-avg_conv = (total_purch / total_vis * 100) if total_vis > 0 else 0
-avg_rev_vis = (total_rev / total_vis) if total_vis > 0 else 0
-
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Total Filtered Visitors", f"{total_vis:,.0f}")
-m2.metric("Total Purchases", f"{total_purch:,.0f}")
-m3.metric("Avg Conversion Rate", f"{avg_conv:.2f}%")
-m4.metric("Avg Rev / Visitor", f"${avg_rev_vis:,.2f}")
-
-st.markdown("<hr>", unsafe_allow_html=True)
-
-# ================ 6. Single Variable Deep Dive =================
-st.subheader("🔍 Single Variable Deep Dive")
-single_var_options = {"Gender": "gender", "Age": "age", "Income": "income", "Region": "region", "Net Worth": "net_worth", "Children": "children", "Marital Status": "marital_status", "Homeowner": "homeowner", "Credit Rating": "credit_rating"}
-
-if "active_single_var" not in st.session_state: st.session_state.active_single_var = "Gender"
-var_cols = st.columns(len(single_var_options))
-for i, label in enumerate(single_var_options.keys()):
-    if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_single_var == label else "secondary", use_container_width=True):
-        st.session_state.active_single_var = label
-        st.rerun()
-
-selected_col = single_var_options[st.session_state.active_single_var]
-
-df_clean_single = dff[~dff[selected_col].isin(['Unknown', 'U', ''])]
-
-df_single = df_clean_single.groupby([selected_col]).agg(
-    Visitors=('total_visitors', 'sum'), 
-    Purchases=('total_purchasers', 'sum'), 
-    Revenue=('total_revenue', 'sum')
-).reset_index()
-
-if not df_single.empty:
-    df_single['Conv %'] = (df_single['Purchases'] / df_single['Visitors'] * 100).round(2)
-    df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
-    df_single = df_single[df_single['Visitors'] >= min_visitors]
-    
-    # Bulletproof integer sorting
-    if selected_col == 'income':
-        df_single['_sort'] = df_single[selected_col].map(INCOME_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    elif selected_col == 'net_worth':
-        df_single['_sort'] = df_single[selected_col].map(NET_WORTH_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    elif selected_col == 'credit_rating':
-        df_single['_sort'] = df_single[selected_col].map(CREDIT_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    else:
-        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
-    
-    display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
-    
-    # Using 'Oranges' colormap to match the Heavenly Heat branding
-    st.dataframe(
-        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='Oranges'), 
-        use_container_width=True, 
-        hide_index=True
-    )
-else:
-    st.info("No data available for this variable with the current filters and traffic floor.")
-
-st.markdown("<hr>", unsafe_allow_html=True)
-
-# ================ 7. Multi-Variable Combination Analysis =================
-st.subheader("📊 Multi-Variable Combination Matrix")
 
 if included_types and not dff.empty:
     combos = []
@@ -322,9 +213,9 @@ if included_types and not dff.empty:
                 hide_index=True
             )
 elif not included_types:
-    st.info("👆 Check the 'Inc' boxes in the Master Filters above to build your combination matrix.")
+    st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
 
-# ================ 8. AI Data Agent =================
+# ================ 6. AI Data Agent =================
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("🤖 Heavenly AI Data Agent")
 if "GEMINI_API_KEY" in st.secrets:
