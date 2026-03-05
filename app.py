@@ -65,13 +65,14 @@ def apply_custom_theme():
                 border-radius: 12px;
                 border: 1px solid #E2D7C8;
                 box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
-                background: #FFFFFF;
-                margin-bottom: .1rem;
+                background: transparent;
+                margin-bottom: 1rem;
             }
             .premium-table-container table {
                 width: 100% !important;
                 border-collapse: collapse !important;
                 font-family: 'Outfit', sans-serif !important;
+                margin-bottom: 0 !important;
             }
             
             /* Standard Table Sizing */
@@ -110,12 +111,12 @@ def apply_custom_theme():
             /* === SPECIAL ULTRA-COMPACT STYLING FOR THE HUGE MATRIX TABLE === */
             .matrix-container table thead tr th,
             .matrix-container table th {
-                font-size: 0.55rem !important; /* Tiny headers to fit 11 columns */
-                padding: 8px 4px !important; /* Stripping out the horizontal fat */
+                font-size: 0.55rem !important; 
+                padding: 8px 4px !important; 
             }
             .matrix-container table tbody tr td,
             .matrix-container table td {
-                font-size: 0.65rem !important; /* Tiny data text */
+                font-size: 0.65rem !important; 
                 padding: 6px 4px !important;
             }
         </style>
@@ -127,7 +128,7 @@ apply_custom_theme()
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 custom_tan_reversed = mcolors.LinearSegmentedColormap.from_list("custom_tan_r", ["#B3845C", "#E2D7C8", "#F9F7F3"])
 
-# Helper function to render perfect HTML tables (Now accepts a custom CSS class!)
+# Helper function to render perfect HTML tables
 def render_premium_table(styler_obj, extra_class=""):
     try:
         styler_obj = styler_obj.hide(axis="index")
@@ -173,6 +174,11 @@ with st.sidebar:
     
     st.markdown("<br>", unsafe_allow_html=True)
     st.header("Global Controls")
+    
+    # NEW: Sorting Toggle Slider
+    sort_order = st.select_slider("Ranking Order", options=["High to Low", "Low to High"], value="High to Low")
+    is_ascending = (sort_order == "Low to High")
+    
     metric_choice = st.radio("Primary Metric Leaderboard", ["Rev/Visitor", "Conv %", "Revenue", "Purchases", "Visitors"])
     min_visitors = st.number_input("Minimum Traffic Floor", value=250)
     
@@ -215,7 +221,8 @@ if not df_single.empty:
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
+    # Applied dynamic sorting
+    df_single = df_single.sort_values(metric_map[metric_choice], ascending=is_ascending)
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
     styler = display_df.style.format(format_standard).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
@@ -257,7 +264,8 @@ for label, col_name in configs:
         })
 
 if predictive_data:
-    pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=False)
+    # Applied dynamic sorting
+    pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=is_ascending)
     
     styler = pred_df.style.format(format_drivers)\
         .background_gradient(subset=['Predictive Swing', 'Conv % (Top)'], cmap=custom_light_green) \
@@ -356,7 +364,8 @@ if included_types and not dff_matrix.empty:
         res['Conv %'] = (res['Purchases'] / res['Visitors'] * 100).round(2)
         res['Rev/Visitor'] = (res['Revenue'] / res['Visitors']).round(2)
         
-        final_res = res[res['Visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=False)
+        # Applied dynamic sorting
+        final_res = res[res['Visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=is_ascending)
         
         metrics = ["Visitors", "Purchases", "Revenue", "Conv %", "Rev/Visitor"]
         ordered_cols = included_types + metrics
@@ -366,9 +375,12 @@ if included_types and not dff_matrix.empty:
         if final_res.empty:
             st.warning(f"No combinations met the Traffic Floor minimum of {min_visitors}.")
         else:
-            styler = final_res[ordered_cols].rename(columns=rename_dict).style.format(format_standard).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
-            # PASS THE CUSTOM MATRIX CLASS HERE!
+            top_50_res = final_res.head(50)
+            styler = top_50_res[ordered_cols].rename(columns=rename_dict).style.format(format_standard).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
             render_premium_table(styler, "matrix-container")
+            
+            if len(final_res) > 50:
+                st.markdown(f"<p style='text-align: right; font-size: 0.8rem; color: #888; font-style: italic;'>Showing Top 50 of {len(final_res)} combinations.</p>", unsafe_allow_html=True)
             
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
