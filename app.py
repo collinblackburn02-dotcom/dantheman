@@ -50,22 +50,81 @@ def apply_custom_theme():
             [data-testid="stMetricLabel"] { color: #B3845C !important; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.85rem; }
             [data-testid="stMetricValue"] { color: #2D2421 !important; font-weight: 700; font-size: 2.2rem; }
             
+            /* Expanders & Dividers */
             [data-testid="stExpander"], .st-emotion-cache-1z1q1o0 { border: 1px solid #E2D7C8 !important; border-radius: 12px !important; background: #FFFFFF; box-shadow: 0 2px 4px rgba(45, 36, 33, 0.02); }
-            .stDataFrame { border: 1px solid #E2D7C8; border-radius: 12px; overflow: hidden; }
             hr { border-top: 1px solid rgba(158, 96, 54, 0.2); margin-top: 2rem; margin-bottom: 2rem; }
+            
+            /* Headers */
             .brand-header { font-size: 2.5rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
             .brand-subtitle { color: #B3845C; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
+            
+            /* === NEW: LUXURY HTML TABLE STYLING === */
+            .premium-table-container {
+                width: 100%;
+                overflow-x: auto;
+                border-radius: 12px;
+                border: 1px solid #E2D7C8;
+                box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
+                background: #FFFFFF;
+                margin-bottom: 1rem;
+            }
+            .premium-table-container table {
+                width: 100%;
+                border-collapse: collapse;
+                font-family: 'Outfit', sans-serif;
+            }
+            .premium-table-container th {
+                background-color: #F2EBE1 !important;
+                color: #9E6036 !important;
+                font-weight: 700 !important;
+                text-align: center !important;
+                padding: 14px 16px !important;
+                border-bottom: 2px solid #D5C6B3 !important;
+                text-transform: uppercase;
+                font-size: 0.85rem;
+                letter-spacing: 0.5px;
+            }
+            .premium-table-container td {
+                text-align: center !important;
+                padding: 12px 16px !important;
+                border-bottom: 1px solid #F0EAD6 !important;
+                color: #3A2A26 !important;
+                font-size: 0.95rem;
+                vertical-align: middle;
+            }
+            .premium-table-container tr:last-child td { border-bottom: none !important; }
+            .premium-table-container tr:hover { opacity: 0.95; }
+            
+            /* Bold & Left-Align the first column to anchor the data */
+            .premium-table-container td:first-child {
+                font-weight: 700 !important;
+                color: #2D2421 !important;
+                text-align: left !important;
+            }
         </style>
     """, unsafe_allow_html=True)
 
 apply_custom_theme()
 
-# Premium Custom Colormaps (Reversed the Tan so the lowest conversion gets the darkest brown)
+# Premium Custom Colormaps 
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 custom_tan_reversed = mcolors.LinearSegmentedColormap.from_list("custom_tan_r", ["#B3845C", "#E2D7C8", "#F9F7F3"])
 
+# Helper function to render perfect HTML tables
+def render_premium_table(styler_obj):
+    try:
+        styler_obj = styler_obj.hide(axis="index")
+    except AttributeError:
+        styler_obj = styler_obj.hide_index() # Fallback for older pandas versions
+    html = styler_obj.to_html()
+    st.markdown(f'<div class="premium-table-container">{html}</div>', unsafe_allow_html=True)
+
 # Reference String for Regions
 REGION_INFO = "📍 **Region Breakdown:** **Northeast:** CT, ME, MA, NH, RI, VT, NJ, NY, PA | **Midwest:** IL, IN, IA, KS, MI, MN, MO, NE, ND, OH, SD, WI | **South:** AL, AR, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV, DC | **West:** AK, AZ, CA, CO, HI, ID, MT, NV, NM, OR, UT, WA, WY"
+
+# Formatting dictionaries (Now with commas for whole numbers!)
+format_standard = {'Visitors': '{:,.0f}', 'Purchases': '{:,.0f}', 'Revenue': '${:,.2f}', 'Conv %': '{:.2f}%', 'Rev/Visitor': '${:,.2f}'}
+format_drivers = {'Conv % (Top)': '{:.2f}%', 'Conv % (Worst)': '{:.2f}%', 'Predictive Swing': '{:.2f}%'}
 
 # ================ 2. Data Connection =================
 @st.cache_resource
@@ -121,13 +180,11 @@ for i, (label, col_name) in enumerate(configs):
         st.session_state.active_single_var = label
         st.rerun()
 
-# Dynamic Region Note
 if st.session_state.active_single_var == "Region":
     st.info(REGION_INFO)
 
 selected_col = dict(configs)[st.session_state.active_single_var]
 
-# Single Variable uses baseline df_master
 df_clean_single = df_master[~df_master[selected_col].isin(['Unknown', 'U', ''])]
 
 df_single = df_clean_single.groupby([selected_col]).agg(
@@ -144,11 +201,9 @@ if not df_single.empty:
     df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
-    st.dataframe(
-        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green), 
-        use_container_width=True, 
-        hide_index=True
-    )
+    # Render with new Premium HTML logic
+    styler = display_df.style.format(format_standard).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
+    render_premium_table(styler)
 else:
     st.info("No data available for this variable with the current traffic floor.")
 
@@ -172,7 +227,6 @@ for label, col_name in configs:
     if len(grp) >= 2:
         grp['Conv %'] = (grp['Purchases'] / grp['Visitors']) * 100
         
-        # Find Top and Worst
         top_row = grp.loc[grp['Conv %'].idxmax()]
         bot_row = grp.loc[grp['Conv %'].idxmin()]
         swing = top_row['Conv %'] - bot_row['Conv %']
@@ -189,15 +243,11 @@ for label, col_name in configs:
 if predictive_data:
     pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=False)
     
-    # Prettier styling: Custom Tan Reversed maps lowest numbers to dark brown
-    styled_pred = pred_df.style.format({
-        'Conv % (Top)': '{:.2f}%',
-        'Conv % (Worst)': '{:.2f}%',
-        'Predictive Swing': '{:.2f}%'
-    }).background_gradient(subset=['Predictive Swing', 'Conv % (Top)'], cmap=custom_light_green) \
-      .background_gradient(subset=['Conv % (Worst)'], cmap=custom_tan_reversed)
-      
-    st.dataframe(styled_pred, use_container_width=True, hide_index=True)
+    styler = pred_df.style.format(format_drivers)\
+        .background_gradient(subset=['Predictive Swing', 'Conv % (Top)'], cmap=custom_light_green) \
+        .background_gradient(subset=['Conv % (Worst)'], cmap=custom_tan_reversed)
+        
+    render_premium_table(styler)
 else:
     st.info("Not enough data to calculate predictive swings based on your current Traffic Floor.")
 
@@ -230,16 +280,14 @@ with st.expander("🎛️ Combination Filters", expanded=True):
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
-# Dynamic Region Note for Multi-Variable Matrix
 if "region" in included_types:
     st.info(REGION_INFO)
 
-# Filter data for KPI blocks and Combination Matrix
 dff_matrix = df_master.copy()
 for col, vals in selected_filters.items(): 
     dff_matrix = dff_matrix[dff_matrix[col].isin(vals)]
 
-# === TOP KPI DASHBOARD (Placed directly under filters) ===
+# === TOP KPI DASHBOARD ===
 st.markdown("<br>", unsafe_allow_html=True)
 if not dff_matrix.empty and (selected_filters or included_types):
     total_vis = dff_matrix['total_visitors'].sum()
@@ -302,11 +350,9 @@ if included_types and not dff_matrix.empty:
         if final_res.empty:
             st.warning(f"No combinations met the Traffic Floor minimum of {min_visitors}.")
         else:
-            st.dataframe(
-                final_res[ordered_cols].rename(columns=rename_dict).style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green), 
-                use_container_width=True, 
-                hide_index=True
-            )
+            styler = final_res[ordered_cols].rename(columns=rename_dict).style.format(format_standard).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
+            render_premium_table(styler)
+            
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
 
