@@ -5,6 +5,7 @@ from google.oauth2 import service_account
 import os
 import itertools
 import matplotlib.colors as mcolors
+import streamlit.components.v1 as components 
 
 # ================ 1. Page Config & Premium Brand CSS =================
 st.set_page_config(page_title="Heavenly Heat | Insights", page_icon="🪵", layout="wide", initial_sidebar_state="expanded")
@@ -28,15 +29,34 @@ def apply_custom_theme():
             p, span, label, .stRadio label { color: #2D2421 !important; }
             
             /* Sleek Buttons */
-            div[data-testid="stButton"] button { border-radius: 8px; font-weight: 500; transition: all 0.2s ease-in-out; }
+            div[data-testid="stButton"] button { 
+                border-radius: 8px; 
+                font-weight: 500; 
+                transition: all 0.2s ease-in-out; 
+                padding: 0px 10px !important; 
+            }
+            
+            /* AGGRESSIVE FIX: Forces "Homeowner" to never wrap on any inner element */
+            div[data-testid="stButton"] button,
+            div[data-testid="stButton"] button div,
+            div[data-testid="stButton"] button p,
+            div[data-testid="stButton"] button span {
+                font-size: 0.85rem !important; 
+                white-space: nowrap !important; 
+                overflow: visible !important;
+            }
             
             /* The SELECTED Variable Button - Lighter Tan & Bold */
             div[data-testid="stButton"] button[kind="primary"] { 
                 background-color: #B3845C !important; 
                 color: #FFFFFF !important; 
-                font-weight: 800 !important; 
                 border: none; 
                 box-shadow: 0 4px 6px rgba(179, 132, 92, 0.2); 
+            }
+            div[data-testid="stButton"] button[kind="primary"] p,
+            div[data-testid="stButton"] button[kind="primary"] span {
+                font-weight: 800 !important; 
+                color: #FFFFFF !important;
             }
             div[data-testid="stButton"] button[kind="primary"]:hover { background-color: #9C6F49 !important; }
             
@@ -133,8 +153,8 @@ def apply_custom_theme():
             /* Override to un-bold the first column in the matrix */
             .matrix-container table tbody tr td:first-child,
             .matrix-container table tbody tr th:first-child {
-                font-weight: 400 !important; /* Normal text weight */
-                color: #3A2A26 !important; /* Match standard data color */
+                font-weight: 400 !important; 
+                color: #3A2A26 !important; 
             }
         </style>
     """, unsafe_allow_html=True)
@@ -192,7 +212,6 @@ with st.sidebar:
     st.markdown("<br>", unsafe_allow_html=True)
     st.header("Global Controls")
     
-    # NEW: Horizontal Radio Button for Ranking Order
     sort_order = st.radio("Ranking Order", ["High to Low", "Low to High"], horizontal=True)
     is_ascending = (sort_order == "Low to High")
     
@@ -280,7 +299,6 @@ for label, col_name in configs:
         })
 
 if predictive_data:
-    # Applied dynamic sorting
     pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=is_ascending)
     
     styler = pred_df.style.format(format_drivers)\
@@ -327,9 +345,9 @@ dff_matrix = df_master.copy()
 for col, vals in selected_filters.items(): 
     dff_matrix = dff_matrix[dff_matrix[col].isin(vals)]
 
-# === TOP KPI DASHBOARD ===
+# === TOP KPI DASHBOARD (NOW ALWAYS VISIBLE) ===
 st.markdown("<br>", unsafe_allow_html=True)
-if not dff_matrix.empty and (selected_filters or included_types):
+if not dff_matrix.empty:
     total_vis = dff_matrix['total_visitors'].sum()
     total_purch = dff_matrix['total_purchasers'].sum()
     total_rev = dff_matrix['total_revenue'].sum()
@@ -342,6 +360,8 @@ if not dff_matrix.empty and (selected_filters or included_types):
     m3.metric("Segment Conv Rate", f"{avg_conv:.2f}%")
     m4.metric("Segment Rev / Visitor", f"${avg_rev_vis:,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
+else:
+    st.warning("No data matches your current combination filters.")
 
 # === COMBINATION TABLE ===
 if included_types and not dff_matrix.empty:
@@ -380,7 +400,6 @@ if included_types and not dff_matrix.empty:
         res['Conv %'] = (res['Purchases'] / res['Visitors'] * 100).round(2)
         res['Rev/Visitor'] = (res['Revenue'] / res['Visitors']).round(2)
         
-        # Applied dynamic sorting
         final_res = res[res['Visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=is_ascending)
         
         metrics = ["Visitors", "Purchases", "Revenue", "Conv %", "Rev/Visitor"]
@@ -423,3 +442,15 @@ if "GEMINI_API_KEY" in st.secrets:
                         st.markdown(response)
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+# ================ 8. Streamlit Auto-Scroll Fix =================
+components.html(
+    """
+    <script>
+        setTimeout(function() {
+            window.parent.document.querySelector('.main').scrollTo(0, 0);
+        }, 100);
+    </script>
+    """,
+    height=0
+)
