@@ -78,15 +78,15 @@ def apply_custom_theme():
                 color: #9E6036 !important;
                 font-weight: 700 !important;
                 text-align: center !important;
-                padding: 14px 16px !important;
+                padding: 10px 10px !important;
                 border-bottom: 2px solid #D5C6B3 !important;
                 text-transform: uppercase;
                 font-size: 0.8rem;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.45px;
             }
             .premium-table-container td {
                 text-align: center !important;
-                padding: 12px 16px !important;
+                padding: 10px 10px !important;
                 border-bottom: 1px solid #F0EAD6 !important;
                 color: #3A2A26 !important;
                 font-size: 0.8rem;
