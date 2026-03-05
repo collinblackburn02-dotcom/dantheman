@@ -36,7 +36,7 @@ def apply_custom_theme():
             div[data-testid="stButton"] button[kind="secondary"] { background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }
             div[data-testid="stButton"] button[kind="secondary"]:hover { border-color: #B3845C; color: #B3845C; }
             
-            /* Overriding Streamlit's Default Red in Dropdown Tags */
+            /* Overriding Streamlit's Default Red in Dropdown Tags to Dark Tan */
             span[data-baseweb="tag"] { background-color: #C1A68D !important; color: #FFFFFF !important; }
             
             /* Metric Cards */
@@ -60,8 +60,9 @@ def apply_custom_theme():
 
 apply_custom_theme()
 
-# Custom Light Green Colormap
+# Premium Custom Colormaps
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
+custom_tan = mcolors.LinearSegmentedColormap.from_list("custom_tan", ["#F9F7F3", "#E2D7C8", "#B3845C"])
 
 # ================ 2. Data Connection =================
 @st.cache_resource
@@ -105,75 +106,10 @@ metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue"
 st.markdown('<p class="brand-header">Audience Insights Engine</p>', unsafe_allow_html=True)
 st.markdown('<p class="brand-subtitle">Powered by Heavenly Heat Data Infrastructure</p>', unsafe_allow_html=True)
 
-# ================ 4. Top KPI Dashboard =================
-dff = df_master.copy()
-total_vis = dff['total_visitors'].sum()
-total_purch = dff['total_purchasers'].sum()
-total_rev = dff['total_revenue'].sum()
-avg_conv = (total_purch / total_vis * 100) if total_vis > 0 else 0
-avg_rev_vis = (total_rev / total_vis) if total_vis > 0 else 0
-
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Total Visitors", f"{total_vis:,.0f}")
-m2.metric("Total Purchases", f"{total_purch:,.0f}")
-m3.metric("Avg Conversion Rate", f"{avg_conv:.2f}%")
-m4.metric("Avg Rev / Visitor", f"${avg_rev_vis:,.2f}")
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ================ 5. NEW: Predictive Power Rankings =================
-st.subheader("🏆 Top Conversion Drivers")
-st.markdown("<p style='font-size: 0.95rem; color: #666;'>This table analyzes all variables to find which traits have the highest predictive power for a sale. Variables with a large 'Predictive Swing' show a massive difference between their best and worst performing segments.</p>", unsafe_allow_html=True)
-
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
 
-predictive_data = []
 
-for label, col_name in configs:
-    # Filter out unknowns for a clean mathematical swing
-    df_clean = dff[~dff[col_name].isin(['Unknown', 'U', ''])]
-    
-    grp = df_clean.groupby(col_name).agg(
-        Visitors=('total_visitors', 'sum'),
-        Purchases=('total_purchasers', 'sum')
-    ).reset_index()
-    
-    # Enforce traffic floor so outliers don't fake a massive swing
-    grp = grp[grp['Visitors'] >= min_visitors]
-    
-    # Need at least 2 buckets to calculate a swing
-    if len(grp) >= 2:
-        grp['Conv %'] = (grp['Purchases'] / grp['Visitors']) * 100
-        min_conv = grp['Conv %'].min()
-        max_conv = grp['Conv %'].max()
-        swing = max_conv - min_conv
-        
-        # Identify the winning segment for the table
-        top_row = grp.loc[grp['Conv %'].idxmax()]
-        
-        predictive_data.append({
-            "Variable Category": label,
-            "Predictive Swing": swing,
-            "Top Performing Segment": top_row[col_name],
-            "Top Segment Conv %": top_row['Conv %']
-        })
-
-if predictive_data:
-    pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=False)
-    st.dataframe(
-        pred_df.style.format({
-            'Predictive Swing': '{:.2f}%',
-            'Top Segment Conv %': '{:.2f}%'
-        }).background_gradient(subset=['Predictive Swing'], cmap=custom_light_green),
-        use_container_width=True,
-        hide_index=True
-    )
-else:
-    st.info("Not enough data to calculate predictive swings based on your current Traffic Floor.")
-
-st.markdown("<hr>", unsafe_allow_html=True)
-
-# ================ 6. Single Variable Deep Dive =================
+# ================ 4. Single Variable Deep Dive (TOP) =================
 st.subheader("🔍 Single Variable Deep Dive")
 
 if "active_single_var" not in st.session_state: st.session_state.active_single_var = "Gender"
@@ -185,6 +121,7 @@ for i, (label, col_name) in enumerate(configs):
 
 selected_col = dict(configs)[st.session_state.active_single_var]
 
+# Single Variable uses baseline df_master
 df_clean_single = df_master[~df_master[selected_col].isin(['Unknown', 'U', ''])]
 
 df_single = df_clean_single.groupby([selected_col]).agg(
@@ -199,7 +136,6 @@ if not df_single.empty:
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
     df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
-    
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
     st.dataframe(
@@ -212,11 +148,60 @@ else:
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# ================ 7. Multi-Variable Combination Analysis =================
+# ================ 5. Predictive Power Rankings (MIDDLE) =================
+st.subheader("🏆 Top Conversion Drivers")
+st.markdown("<p style='font-size: 0.95rem; color: #666;'>This table ranks demographic traits by their <b>Predictive Swing</b> (the conversion rate difference between a trait's best and worst performing segments).</p>", unsafe_allow_html=True)
+
+predictive_data = []
+
+for label, col_name in configs:
+    df_clean = df_master[~df_master[col_name].isin(['Unknown', 'U', ''])]
+    grp = df_clean.groupby(col_name).agg(
+        Visitors=('total_visitors', 'sum'),
+        Purchases=('total_purchasers', 'sum')
+    ).reset_index()
+    
+    grp = grp[grp['Visitors'] >= min_visitors]
+    
+    if len(grp) >= 2:
+        grp['Conv %'] = (grp['Purchases'] / grp['Visitors']) * 100
+        
+        # Find Top and Worst
+        top_row = grp.loc[grp['Conv %'].idxmax()]
+        bot_row = grp.loc[grp['Conv %'].idxmin()]
+        swing = top_row['Conv %'] - bot_row['Conv %']
+        
+        predictive_data.append({
+            "Demographic Trait": label,
+            "Top Segment": top_row[col_name],
+            "Conv % (Top)": top_row['Conv %'],
+            "Worst Segment": bot_row[col_name],
+            "Conv % (Worst)": bot_row['Conv %'],
+            "Predictive Swing": swing
+        })
+
+if predictive_data:
+    pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=False)
+    
+    # Prettier styling: Green for top/swing, Custom Tan for worst
+    styled_pred = pred_df.style.format({
+        'Conv % (Top)': '{:.2f}%',
+        'Conv % (Worst)': '{:.2f}%',
+        'Predictive Swing': '{:.2f}%'
+    }).background_gradient(subset=['Predictive Swing', 'Conv % (Top)'], cmap=custom_light_green) \
+      .background_gradient(subset=['Conv % (Worst)'], cmap=custom_tan)
+      
+    st.dataframe(styled_pred, use_container_width=True, hide_index=True)
+else:
+    st.info("Not enough data to calculate predictive swings based on your current Traffic Floor.")
+
+st.markdown("<hr>", unsafe_allow_html=True)
+
+# ================ 6. Multi-Variable Combination Analysis (BOTTOM) =================
 st.subheader("📊 Multi-Variable Combination Matrix")
 
 with st.expander("🎛️ Combination Filters", expanded=True):
-    st.markdown("<p style='font-size: 0.9rem; color: #666;'>Filters applied here ONLY affect the Combination Matrix below.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 0.9rem; color: #666;'>Select filters below. The KPI cards and Combination Matrix will instantly update based on your choices.</p>", unsafe_allow_html=True)
     
     selected_filters, included_types = {}, []
     filter_cols = st.columns(3)
@@ -239,10 +224,28 @@ with st.expander("🎛️ Combination Filters", expanded=True):
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
+# Filter data for KPI blocks and Combination Matrix
 dff_matrix = df_master.copy()
 for col, vals in selected_filters.items(): 
     dff_matrix = dff_matrix[dff_matrix[col].isin(vals)]
 
+# === TOP KPI DASHBOARD (Placed directly under filters) ===
+st.markdown("<br>", unsafe_allow_html=True)
+if not dff_matrix.empty and (selected_filters or included_types):
+    total_vis = dff_matrix['total_visitors'].sum()
+    total_purch = dff_matrix['total_purchasers'].sum()
+    total_rev = dff_matrix['total_revenue'].sum()
+    avg_conv = (total_purch / total_vis * 100) if total_vis > 0 else 0
+    avg_rev_vis = (total_rev / total_vis) if total_vis > 0 else 0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Filtered Segment Visitors", f"{total_vis:,.0f}")
+    m2.metric("Segment Purchases", f"{total_purch:,.0f}")
+    m3.metric("Segment Conv Rate", f"{avg_conv:.2f}%")
+    m4.metric("Segment Rev / Visitor", f"${avg_rev_vis:,.2f}")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+# === COMBINATION TABLE ===
 if included_types and not dff_matrix.empty:
     combos = []
     max_combo_size = min(3, len(included_types))
@@ -297,7 +300,7 @@ if included_types and not dff_matrix.empty:
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
 
-# ================ 8. AI Data Agent =================
+# ================ 7. AI Data Agent =================
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("🤖 Heavenly AI Data Agent")
 if "GEMINI_API_KEY" in st.secrets:
