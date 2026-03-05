@@ -26,7 +26,7 @@ def apply_custom_theme():
             div[data-testid="stButton"] button[kind="primary"] { 
                 background-color: #B3845C !important; 
                 color: #FFFFFF !important; 
-                font-weight: 800 !important; /* Bolded as requested */
+                font-weight: 800 !important; 
                 border: none; 
                 box-shadow: 0 4px 6px rgba(179, 132, 92, 0.2); 
             }
@@ -52,7 +52,7 @@ def apply_custom_theme():
 
 apply_custom_theme()
 
-# Custom Light Green Colormap (Prevents it from getting too dark)
+# Custom Light Green Colormap
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 
 # ================ 2. Data Connection =================
@@ -124,22 +124,11 @@ if not df_single.empty:
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
-    if selected_col == 'income':
-        df_single['_sort'] = df_single[selected_col].map(INCOME_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    elif selected_col == 'net_worth':
-        df_single['_sort'] = df_single[selected_col].map(NET_WORTH_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    elif selected_col == 'credit_rating':
-        df_single['_sort'] = df_single[selected_col].map(CREDIT_MAP)
-        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
-    else:
-        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
+    # THE FIX: Always sort strictly by the user's chosen Primary Metric, highest to lowest.
+    df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
     
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
-    # Applied custom light green gradient
     st.dataframe(
         display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green), 
         use_container_width=True, 
@@ -228,7 +217,6 @@ if included_types and not dff.empty:
         if final_res.empty:
             st.warning(f"No combinations met the Traffic Floor minimum of {min_visitors}.")
         else:
-            # Applied custom light green gradient
             st.dataframe(
                 final_res[ordered_cols].rename(columns=rename_dict).style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green), 
                 use_container_width=True, 
