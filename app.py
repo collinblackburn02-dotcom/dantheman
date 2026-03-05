@@ -55,7 +55,7 @@ def apply_custom_theme():
             hr { border-top: 1px solid rgba(158, 96, 54, 0.2); margin-top: 2rem; margin-bottom: 2rem; }
             
             /* Headers */
-            .brand-header { font-size: 2.5rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
+            .brand-header { font-size: 1.4rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
             .brand-subtitle { color: #B3845C; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
             
             /* === NEW: LUXURY HTML TABLE STYLING === */
@@ -81,7 +81,7 @@ def apply_custom_theme():
                 padding: 14px 16px !important;
                 border-bottom: 2px solid #D5C6B3 !important;
                 text-transform: uppercase;
-                font-size: 0.85rem;
+                font-size: 0.8rem;
                 letter-spacing: 0.5px;
             }
             .premium-table-container td {
@@ -89,7 +89,7 @@ def apply_custom_theme():
                 padding: 12px 16px !important;
                 border-bottom: 1px solid #F0EAD6 !important;
                 color: #3A2A26 !important;
-                font-size: 0.70rem;
+                font-size: 0.8rem;
                 vertical-align: middle;
             }
             .premium-table-container tr:last-child td { border-bottom: none !important; }
