@@ -42,6 +42,27 @@ def apply_custom_theme():
                 color: #FFFFFF !important;
             }
             
+            /* === THE RESTORED PRETTY METRIC CARDS === */
+            [data-testid="stMetric"] {
+                background-color: #FFFFFF;
+                border: 1px solid #E2D7C8;
+                border-radius: 12px;
+                padding: 20px 24px;
+                box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
+            }
+            [data-testid="stMetricLabel"] {
+                color: #B3845C !important;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                font-size: 0.85rem;
+            }
+            [data-testid="stMetricValue"] {
+                color: #2D2421 !important;
+                font-weight: 700;
+                font-size: 2.2rem;
+            }
+            
             [data-testid="stExpander"], .st-emotion-cache-1z1q1o0 { border: 1px solid #E2D7C8 !important; border-radius: 12px !important; background: #FFFFFF; box-shadow: 0 2px 4px rgba(45, 36, 33, 0.02); }
             .stDataFrame { border: 1px solid #E2D7C8; border-radius: 12px; overflow: hidden; }
             hr { border-top: 1px solid rgba(158, 96, 54, 0.2); margin-top: 2rem; margin-bottom: 2rem; }
@@ -124,7 +145,6 @@ if not df_single.empty:
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    # THE FIX: Always sort strictly by the user's chosen Primary Metric, highest to lowest.
     df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
     
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
@@ -167,10 +187,31 @@ with st.expander("🎛️ Combination Filters", expanded=True):
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
+# DFF is created here, specifically for the combination matrix
 dff = df_master.copy()
 for col, vals in selected_filters.items(): 
     dff = dff[dff[col].isin(vals)]
 
+# === THE RESTORED KPI CARDS ===
+st.markdown("<br>", unsafe_allow_html=True)
+if not dff.empty:
+    total_vis = dff['total_visitors'].sum()
+    total_purch = dff['total_purchasers'].sum()
+    total_rev = dff['total_revenue'].sum()
+    avg_conv = (total_purch / total_vis * 100) if total_vis > 0 else 0
+    avg_rev_vis = (total_rev / total_vis) if total_vis > 0 else 0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Filtered Segment Visitors", f"{total_vis:,.0f}")
+    m2.metric("Segment Purchases", f"{total_purch:,.0f}")
+    m3.metric("Segment Conv Rate", f"{avg_conv:.2f}%")
+    m4.metric("Segment Rev / Visitor", f"${avg_rev_vis:,.2f}")
+else:
+    st.warning("No data matches your current combination filters.")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# === THE COMBINATION TABLE ===
 if included_types and not dff.empty:
     combos = []
     max_combo_size = min(3, len(included_types))
@@ -223,30 +264,7 @@ if included_types and not dff.empty:
                 hide_index=True
             )
 elif not included_types:
-    st.info("👆 Check the 'Inc' boxes above to build your combination matrix, or view your baseline totals below:")
-    
-    # Calculate the summary stats based on the current dropdown filters
-    total_vis = dff['total_visitors'].sum()
-    total_purch = dff['total_purchasers'].sum()
-    total_rev = dff['total_revenue'].sum()
-    
-    if total_vis >= min_visitors:
-        summary_df = pd.DataFrame([{
-            "Audience Segment": "Overall Filtered Baseline",
-            "Visitors": total_vis, 
-            "Purchases": total_purch, 
-            "Revenue": total_rev,
-            "Conv %": (total_purch / total_vis * 100).round(2) if total_vis > 0 else 0,
-            "Rev/Visitor": (total_rev / total_vis).round(2) if total_vis > 0 else 0
-        }])
-        
-        st.dataframe(
-            summary_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}), 
-            use_container_width=True,
-            hide_index=True
-        )
-    else:
-        st.warning(f"Not enough traffic to meet the Minimum Floor of {min_visitors}.")
+    st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
 
 # ================ 6. AI Data Agent =================
 st.markdown("<hr>", unsafe_allow_html=True)
