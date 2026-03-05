@@ -68,29 +68,25 @@ def apply_custom_theme():
                 background: #FFFFFF;
                 margin-bottom: 1rem;
             }
-            .premium-table-container table {
-                width: 100%;
-                border-collapse: collapse;
-                font-family: 'Outfit', sans-serif;
-            }
-            .premium-table-container th {
+       .premium-table-container th {
                 background-color: #F2EBE1 !important;
                 color: #9E6036 !important;
                 font-weight: 700 !important;
                 text-align: center !important;
-                padding: 10px 10px !important;
+                padding: 8px 10px !important; /* ULTRA COMPACT PADDING */
                 border-bottom: 2px solid #D5C6B3 !important;
                 text-transform: uppercase;
-                font-size: 0.8rem;
-                letter-spacing: 0.45px;
+                font-size: 0.65rem; /* TINY, CRISP HEADERS */
+                letter-spacing: 0.5px;
             }
             .premium-table-container td {
                 text-align: center !important;
-                padding: 10px 10px !important;
+                padding: 6px 10px !important; /* ULTRA COMPACT ROW HEIGHT */
                 border-bottom: 1px solid #F0EAD6 !important;
                 color: #3A2A26 !important;
-                font-size: 0.8rem;
+                font-size: 0.75rem; /* SMALLER TEXT */
                 vertical-align: middle;
+    
             }
             .premium-table-container tr:last-child td { border-bottom: none !important; }
             .premium-table-container tr:hover { opacity: 0.95; }
