@@ -272,7 +272,22 @@ st.subheader("🤖 Heavenly AI Data Agent")
 if "GEMINI_API_KEY" in st.secrets:
     from pandasai import SmartDataframe
     from langchain_google_genai import ChatGoogleGenerativeAI
+    
     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=st.secrets["GEMINI_API_KEY"])
-    sdf = SmartDataframe(df_master, config={"llm": llm})
+    
+    # THE FIX: Added enforce_privacy and enable_cache to reduce API calls
+    sdf = SmartDataframe(df_master, config={
+        "llm": llm,
+        "enforce_privacy": True, 
+        "enable_cache": True
+    })
+    
     if prompt := st.chat_input("Ask me about your audience..."):
-        with st.chat_message("assistant"): st.markdown(sdf.chat(prompt))
+        with st.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("assistant"): 
+            with st.spinner("Crunching data..."):
+                try:
+                    response = sdf.chat(prompt)
+                    st.markdown(response)
+                except Exception as e:
+                    st.error(f"API Error: {e}")
