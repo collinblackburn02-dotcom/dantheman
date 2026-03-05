@@ -55,10 +55,10 @@ def apply_custom_theme():
             hr { border-top: 1px solid rgba(158, 96, 54, 0.2); margin-top: 2rem; margin-bottom: 2rem; }
             
             /* Headers */
-            .brand-header { font-size: 1.4rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
+            .brand-header { font-size: 2.5rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
             .brand-subtitle { color: #B3845C; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
             
-        /* === NEW: LUXURY HTML TABLE STYLING === */
+            /* === LUXURY HTML TABLE STYLING === */
             .premium-table-container {
                 width: 100%;
                 overflow-x: auto;
@@ -69,46 +69,55 @@ def apply_custom_theme():
                 margin-bottom: 1rem;
             }
             .premium-table-container table {
-                width: 100% !important; /* Stretches table to fit screen */
+                width: 100% !important;
                 border-collapse: collapse !important;
                 font-family: 'Outfit', sans-serif !important;
             }
             
-            /* Bulletproof Header Targeting */
+            /* Standard Table Sizing */
             .premium-table-container table thead tr th,
             .premium-table-container table th {
-                background-color: #F2EBE1 !important; /* Restores the missing Tan background */
+                background-color: #F2EBE1 !important;
                 color: #9E6036 !important;
                 font-weight: 700 !important;
-                text-align: center !important; /* Centers Headers */
-                padding: 12px 14px !important; /* Increased padding for breathing room */
+                text-align: center !important; 
+                padding: 12px 14px !important; 
                 border-bottom: 2px solid #D5C6B3 !important;
                 text-transform: uppercase !important;
                 font-size: 0.70rem !important;
                 letter-spacing: 0.5px !important;
+                white-space: nowrap !important;
             }
-            
-            /* Bulletproof Data Row Targeting */
             .premium-table-container table tbody tr td,
             .premium-table-container table td {
-                text-align: center !important; /* Centers all standard data */
-                padding: 10px 14px !important; /* Increased padding for breathing room */
+                text-align: center !important; 
+                padding: 10px 14px !important; 
                 border-bottom: 1px solid #F0EAD6 !important;
                 color: #3A2A26 !important;
                 font-size: 0.80rem !important;
                 vertical-align: middle !important;
+                white-space: nowrap !important;
             }
-            
-            /* Bold the First Column, but keep it CENTERED */
             .premium-table-container table tbody tr td:first-child,
             .premium-table-container table tbody tr th:first-child {
                 font-weight: 700 !important;
                 color: #2D2421 !important;
-                text-align: center !important; /* Centers the Left Column */
+                text-align: center !important; 
             }
-            
             .premium-table-container tr:last-child td { border-bottom: none !important; }
             .premium-table-container tr:hover { opacity: 0.95; }
+            
+            /* === SPECIAL ULTRA-COMPACT STYLING FOR THE HUGE MATRIX TABLE === */
+            .matrix-container table thead tr th,
+            .matrix-container table th {
+                font-size: 0.55rem !important; /* Tiny headers to fit 11 columns */
+                padding: 8px 4px !important; /* Stripping out the horizontal fat */
+            }
+            .matrix-container table tbody tr td,
+            .matrix-container table td {
+                font-size: 0.65rem !important; /* Tiny data text */
+                padding: 6px 4px !important;
+            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -118,19 +127,19 @@ apply_custom_theme()
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 custom_tan_reversed = mcolors.LinearSegmentedColormap.from_list("custom_tan_r", ["#B3845C", "#E2D7C8", "#F9F7F3"])
 
-# Helper function to render perfect HTML tables
-def render_premium_table(styler_obj):
+# Helper function to render perfect HTML tables (Now accepts a custom CSS class!)
+def render_premium_table(styler_obj, extra_class=""):
     try:
         styler_obj = styler_obj.hide(axis="index")
     except AttributeError:
-        styler_obj = styler_obj.hide_index() # Fallback for older pandas versions
+        styler_obj = styler_obj.hide_index() 
     html = styler_obj.to_html()
-    st.markdown(f'<div class="premium-table-container">{html}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="premium-table-container {extra_class}">{html}</div>', unsafe_allow_html=True)
 
 # Reference String for Regions
 REGION_INFO = "📍 **Region Breakdown:** **Northeast:** CT, ME, MA, NH, RI, VT, NJ, NY, PA | **Midwest:** IL, IN, IA, KS, MI, MN, MO, NE, ND, OH, SD, WI | **South:** AL, AR, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV, DC | **West:** AK, AZ, CA, CO, HI, ID, MT, NV, NM, OR, UT, WA, WY"
 
-# Formatting dictionaries (Now with commas for whole numbers!)
+# Formatting dictionaries 
 format_standard = {'Visitors': '{:,.0f}', 'Purchases': '{:,.0f}', 'Revenue': '${:,.2f}', 'Conv %': '{:.2f}%', 'Rev/Visitor': '${:,.2f}'}
 format_drivers = {'Conv % (Top)': '{:.2f}%', 'Conv % (Worst)': '{:.2f}%', 'Predictive Swing': '{:.2f}%'}
 
@@ -209,7 +218,6 @@ if not df_single.empty:
     df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
-    # Render with new Premium HTML logic
     styler = display_df.style.format(format_standard).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
     render_premium_table(styler)
 else:
@@ -359,7 +367,8 @@ if included_types and not dff_matrix.empty:
             st.warning(f"No combinations met the Traffic Floor minimum of {min_visitors}.")
         else:
             styler = final_res[ordered_cols].rename(columns=rename_dict).style.format(format_standard).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
-            render_premium_table(styler)
+            # PASS THE CUSTOM MATRIX CLASS HERE!
+            render_premium_table(styler, "matrix-container")
             
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
