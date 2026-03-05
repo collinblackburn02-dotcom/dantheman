@@ -4,6 +4,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import os
 import itertools
+import matplotlib.colors as mcolors
 
 # ================ 1. Page Config & Premium Brand CSS =================
 st.set_page_config(page_title="Heavenly Heat | Insights", page_icon="🪵", layout="wide", initial_sidebar_state="expanded")
@@ -11,26 +12,48 @@ st.set_page_config(page_title="Heavenly Heat | Insights", page_icon="🪵", layo
 def apply_custom_theme():
     st.markdown("""
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
             html, body, [class*="css"] { font-family: 'Outfit', sans-serif; }
             .stApp { background-color: #F9F7F3; }
             [data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E2D7C8; }
             h1, h2, h3 { color: #2D2421 !important; font-weight: 600 !important; }
             p, span, label, .stRadio label { color: #2D2421 !important; }
-            div[data-testid="stButton"] button { border-radius: 8px; font-weight: 600; transition: all 0.2s ease-in-out; }
-            div[data-testid="stButton"] button[kind="primary"] { background-color: #9E6036; color: #FFFFFF; border: none; box-shadow: 0 4px 6px rgba(158, 96, 54, 0.2); }
-            div[data-testid="stButton"] button[kind="primary"]:hover { background-color: #824D2A; box-shadow: 0 6px 10px rgba(158, 96, 54, 0.3); }
+            
+            /* Sleek Buttons */
+            div[data-testid="stButton"] button { border-radius: 8px; font-weight: 500; transition: all 0.2s ease-in-out; }
+            
+            /* The SELECTED Variable Button - Lighter Tan & Bold */
+            div[data-testid="stButton"] button[kind="primary"] { 
+                background-color: #B3845C !important; 
+                color: #FFFFFF !important; 
+                font-weight: 800 !important; /* Bolded as requested */
+                border: none; 
+                box-shadow: 0 4px 6px rgba(179, 132, 92, 0.2); 
+            }
+            div[data-testid="stButton"] button[kind="primary"]:hover { background-color: #9C6F49 !important; }
+            
+            /* Unselected Buttons */
             div[data-testid="stButton"] button[kind="secondary"] { background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }
-            div[data-testid="stButton"] button[kind="secondary"]:hover { border-color: #9E6036; color: #9E6036; }
+            div[data-testid="stButton"] button[kind="secondary"]:hover { border-color: #B3845C; color: #B3845C; }
+            
+            /* Overriding Streamlit's Default Red in Dropdown Tags to Dark Tan */
+            span[data-baseweb="tag"] {
+                background-color: #C1A68D !important;
+                color: #FFFFFF !important;
+            }
+            
             [data-testid="stExpander"], .st-emotion-cache-1z1q1o0 { border: 1px solid #E2D7C8 !important; border-radius: 12px !important; background: #FFFFFF; box-shadow: 0 2px 4px rgba(45, 36, 33, 0.02); }
             .stDataFrame { border: 1px solid #E2D7C8; border-radius: 12px; overflow: hidden; }
             hr { border-top: 1px solid rgba(158, 96, 54, 0.2); margin-top: 2rem; margin-bottom: 2rem; }
             .brand-header { font-size: 2.5rem; font-weight: 700; color: #2D2421; margin-bottom: 0px; padding-bottom: 0px; }
-            .brand-subtitle { color: #9E6036; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
+            .brand-subtitle { color: #B3845C; font-weight: 500; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px; }
         </style>
     """, unsafe_allow_html=True)
 
 apply_custom_theme()
+
+# Custom Light Green Colormap (Prevents it from getting too dark)
+custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 
 # ================ 2. Data Connection =================
 @st.cache_resource
@@ -57,7 +80,7 @@ with st.sidebar:
     if os.path.exists("logo.png"):
         st.image("logo.png", use_container_width=True)
     else:
-        st.markdown("<h2 style='color: #9E6036; text-align: center; margin-bottom: 0;'>🪵 Heavenly Heat</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color: #B3845C; text-align: center; margin-bottom: 0;'>🪵 Heavenly Heat</h2>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888; font-size: 0.8rem;'>Intelligence Engine</p>", unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
@@ -75,7 +98,7 @@ metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue"
 st.markdown('<p class="brand-header">Audience Insights Engine</p>', unsafe_allow_html=True)
 st.markdown('<p class="brand-subtitle">Powered by Heavenly Heat Data Infrastructure</p>', unsafe_allow_html=True)
 
-# ================ 4. Single Variable Deep Dive (AT THE TOP) =================
+# ================ 4. Single Variable Deep Dive =================
 st.subheader("🔍 Single Variable Deep Dive")
 single_var_options = {"Gender": "gender", "Age": "age", "Income": "income", "Region": "region", "Net Worth": "net_worth", "Children": "children", "Marital Status": "marital_status", "Homeowner": "homeowner", "Credit Rating": "credit_rating"}
 
@@ -88,7 +111,6 @@ for i, label in enumerate(single_var_options.keys()):
 
 selected_col = single_var_options[st.session_state.active_single_var]
 
-# THIS USES THE RAW MASTER DATA (No multi-variable filters apply here)
 df_clean_single = df_master[~df_master[selected_col].isin(['Unknown', 'U', ''])]
 
 df_single = df_clean_single.groupby([selected_col]).agg(
@@ -102,7 +124,6 @@ if not df_single.empty:
     df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
     df_single = df_single[df_single['Visitors'] >= min_visitors]
     
-    # Clean Categorical Sorting based on Sidebar Metric
     is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
     if selected_col == 'income':
         df_single['_sort'] = df_single[selected_col].map(INCOME_MAP)
@@ -118,8 +139,9 @@ if not df_single.empty:
     
     display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
     
+    # Applied custom light green gradient
     st.dataframe(
-        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='Oranges'), 
+        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green), 
         use_container_width=True, 
         hide_index=True
     )
@@ -128,7 +150,7 @@ else:
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# ================ 5. Multi-Variable Combination Analysis (BOTTOM) =================
+# ================ 5. Multi-Variable Combination Analysis =================
 st.subheader("📊 Multi-Variable Combination Matrix")
 
 with st.expander("🎛️ Combination Filters", expanded=True):
@@ -141,7 +163,7 @@ with st.expander("🎛️ Combination Filters", expanded=True):
     for i, (label, col_name) in enumerate(configs):
         with filter_cols[i % 3]:
             c_title, c_inc = st.columns([3, 1])
-            c_title.markdown(f'<p style="font-weight: 600; color: #9E6036; margin-bottom: 0;">{label}</p>', unsafe_allow_html=True)
+            c_title.markdown(f'<p style="font-weight: 600; color: #B3845C; margin-bottom: 0;">{label}</p>', unsafe_allow_html=True)
             is_inc = c_inc.checkbox("Inc", key=f"inc_{col_name}", help=f"Include {label} in Combination Matrix")
             
             opts = [x for x in df_master[col_name].unique() if x not in ['Unknown', 'U', '']]
@@ -156,7 +178,6 @@ with st.expander("🎛️ Combination Filters", expanded=True):
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
-# DFF is created here, specifically for the combination matrix
 dff = df_master.copy()
 for col, vals in selected_filters.items(): 
     dff = dff[dff[col].isin(vals)]
@@ -207,8 +228,9 @@ if included_types and not dff.empty:
         if final_res.empty:
             st.warning(f"No combinations met the Traffic Floor minimum of {min_visitors}.")
         else:
+            # Applied custom light green gradient
             st.dataframe(
-                final_res[ordered_cols].rename(columns=rename_dict).style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='Oranges'), 
+                final_res[ordered_cols].rename(columns=rename_dict).style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green), 
                 use_container_width=True, 
                 hide_index=True
             )
