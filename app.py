@@ -36,13 +36,10 @@ def apply_custom_theme():
             div[data-testid="stButton"] button[kind="secondary"] { background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }
             div[data-testid="stButton"] button[kind="secondary"]:hover { border-color: #B3845C; color: #B3845C; }
             
-            /* Overriding Streamlit's Default Red in Dropdown Tags to Dark Tan */
-            span[data-baseweb="tag"] {
-                background-color: #C1A68D !important;
-                color: #FFFFFF !important;
-            }
+            /* Overriding Streamlit's Default Red in Dropdown Tags */
+            span[data-baseweb="tag"] { background-color: #C1A68D !important; color: #FFFFFF !important; }
             
-            /* === THE RESTORED PRETTY METRIC CARDS === */
+            /* Metric Cards */
             [data-testid="stMetric"] {
                 background-color: #FFFFFF;
                 border: 1px solid #E2D7C8;
@@ -50,18 +47,8 @@ def apply_custom_theme():
                 padding: 20px 24px;
                 box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04);
             }
-            [data-testid="stMetricLabel"] {
-                color: #B3845C !important;
-                font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                font-size: 0.85rem;
-            }
-            [data-testid="stMetricValue"] {
-                color: #2D2421 !important;
-                font-weight: 700;
-                font-size: 2.2rem;
-            }
+            [data-testid="stMetricLabel"] { color: #B3845C !important; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.85rem; }
+            [data-testid="stMetricValue"] { color: #2D2421 !important; font-weight: 700; font-size: 2.2rem; }
             
             [data-testid="stExpander"], .st-emotion-cache-1z1q1o0 { border: 1px solid #E2D7C8 !important; border-radius: 12px !important; background: #FFFFFF; box-shadow: 0 2px 4px rgba(45, 36, 33, 0.02); }
             .stDataFrame { border: 1px solid #E2D7C8; border-radius: 12px; overflow: hidden; }
@@ -115,22 +102,88 @@ with st.sidebar:
 
 metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue", "Visitors": "Visitors", "Rev/Visitor": "Rev/Visitor"}
 
-# Header Area
 st.markdown('<p class="brand-header">Audience Insights Engine</p>', unsafe_allow_html=True)
 st.markdown('<p class="brand-subtitle">Powered by Heavenly Heat Data Infrastructure</p>', unsafe_allow_html=True)
 
-# ================ 4. Single Variable Deep Dive =================
+# ================ 4. Top KPI Dashboard =================
+dff = df_master.copy()
+total_vis = dff['total_visitors'].sum()
+total_purch = dff['total_purchasers'].sum()
+total_rev = dff['total_revenue'].sum()
+avg_conv = (total_purch / total_vis * 100) if total_vis > 0 else 0
+avg_rev_vis = (total_rev / total_vis) if total_vis > 0 else 0
+
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Total Visitors", f"{total_vis:,.0f}")
+m2.metric("Total Purchases", f"{total_purch:,.0f}")
+m3.metric("Avg Conversion Rate", f"{avg_conv:.2f}%")
+m4.metric("Avg Rev / Visitor", f"${avg_rev_vis:,.2f}")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ================ 5. NEW: Predictive Power Rankings =================
+st.subheader("🏆 Top Conversion Drivers")
+st.markdown("<p style='font-size: 0.95rem; color: #666;'>This table analyzes all variables to find which traits have the highest predictive power for a sale. Variables with a large 'Predictive Swing' show a massive difference between their best and worst performing segments.</p>", unsafe_allow_html=True)
+
+configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
+
+predictive_data = []
+
+for label, col_name in configs:
+    # Filter out unknowns for a clean mathematical swing
+    df_clean = dff[~dff[col_name].isin(['Unknown', 'U', ''])]
+    
+    grp = df_clean.groupby(col_name).agg(
+        Visitors=('total_visitors', 'sum'),
+        Purchases=('total_purchasers', 'sum')
+    ).reset_index()
+    
+    # Enforce traffic floor so outliers don't fake a massive swing
+    grp = grp[grp['Visitors'] >= min_visitors]
+    
+    # Need at least 2 buckets to calculate a swing
+    if len(grp) >= 2:
+        grp['Conv %'] = (grp['Purchases'] / grp['Visitors']) * 100
+        min_conv = grp['Conv %'].min()
+        max_conv = grp['Conv %'].max()
+        swing = max_conv - min_conv
+        
+        # Identify the winning segment for the table
+        top_row = grp.loc[grp['Conv %'].idxmax()]
+        
+        predictive_data.append({
+            "Variable Category": label,
+            "Predictive Swing": swing,
+            "Top Performing Segment": top_row[col_name],
+            "Top Segment Conv %": top_row['Conv %']
+        })
+
+if predictive_data:
+    pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=False)
+    st.dataframe(
+        pred_df.style.format({
+            'Predictive Swing': '{:.2f}%',
+            'Top Segment Conv %': '{:.2f}%'
+        }).background_gradient(subset=['Predictive Swing'], cmap=custom_light_green),
+        use_container_width=True,
+        hide_index=True
+    )
+else:
+    st.info("Not enough data to calculate predictive swings based on your current Traffic Floor.")
+
+st.markdown("<hr>", unsafe_allow_html=True)
+
+# ================ 6. Single Variable Deep Dive =================
 st.subheader("🔍 Single Variable Deep Dive")
-single_var_options = {"Gender": "gender", "Age": "age", "Income": "income", "Region": "region", "Net Worth": "net_worth", "Children": "children", "Marital Status": "marital_status", "Homeowner": "homeowner", "Credit Rating": "credit_rating"}
 
 if "active_single_var" not in st.session_state: st.session_state.active_single_var = "Gender"
-var_cols = st.columns(len(single_var_options))
-for i, label in enumerate(single_var_options.keys()):
+var_cols = st.columns(len(configs))
+for i, (label, col_name) in enumerate(configs):
     if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_single_var == label else "secondary", use_container_width=True):
         st.session_state.active_single_var = label
         st.rerun()
 
-selected_col = single_var_options[st.session_state.active_single_var]
+selected_col = dict(configs)[st.session_state.active_single_var]
 
 df_clean_single = df_master[~df_master[selected_col].isin(['Unknown', 'U', ''])]
 
@@ -159,13 +212,12 @@ else:
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-# ================ 5. Multi-Variable Combination Analysis =================
+# ================ 7. Multi-Variable Combination Analysis =================
 st.subheader("📊 Multi-Variable Combination Matrix")
 
 with st.expander("🎛️ Combination Filters", expanded=True):
     st.markdown("<p style='font-size: 0.9rem; color: #666;'>Filters applied here ONLY affect the Combination Matrix below.</p>", unsafe_allow_html=True)
     
-    configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
     selected_filters, included_types = {}, []
     filter_cols = st.columns(3)
 
@@ -187,38 +239,17 @@ with st.expander("🎛️ Combination Filters", expanded=True):
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
-# DFF is created here, specifically for the combination matrix
-dff = df_master.copy()
+dff_matrix = df_master.copy()
 for col, vals in selected_filters.items(): 
-    dff = dff[dff[col].isin(vals)]
+    dff_matrix = dff_matrix[dff_matrix[col].isin(vals)]
 
-# === THE RESTORED KPI CARDS ===
-st.markdown("<br>", unsafe_allow_html=True)
-if not dff.empty:
-    total_vis = dff['total_visitors'].sum()
-    total_purch = dff['total_purchasers'].sum()
-    total_rev = dff['total_revenue'].sum()
-    avg_conv = (total_purch / total_vis * 100) if total_vis > 0 else 0
-    avg_rev_vis = (total_rev / total_vis) if total_vis > 0 else 0
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Filtered Segment Visitors", f"{total_vis:,.0f}")
-    m2.metric("Segment Purchases", f"{total_purch:,.0f}")
-    m3.metric("Segment Conv Rate", f"{avg_conv:.2f}%")
-    m4.metric("Segment Rev / Visitor", f"${avg_rev_vis:,.2f}")
-else:
-    st.warning("No data matches your current combination filters.")
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# === THE COMBINATION TABLE ===
-if included_types and not dff.empty:
+if included_types and not dff_matrix.empty:
     combos = []
     max_combo_size = min(3, len(included_types))
     
     for r in range(1, max_combo_size + 1):
         for subset in itertools.combinations(included_types, r):
-            temp_df = dff.copy()
+            temp_df = dff_matrix.copy()
             
             for col in subset:
                 temp_df = temp_df[~temp_df[col].isin(['Unknown', 'U', ''])]
@@ -266,34 +297,25 @@ if included_types and not dff.empty:
 elif not included_types:
     st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
 
-# ================ 6. AI Data Agent =================
+# ================ 8. AI Data Agent =================
 st.markdown("<hr>", unsafe_allow_html=True)
 st.subheader("🤖 Heavenly AI Data Agent")
 if "GEMINI_API_KEY" in st.secrets:
     from pandasai import SmartDataframe
     from langchain_google_genai import ChatGoogleGenerativeAI
-    
     llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=st.secrets["GEMINI_API_KEY"])
+    sdf = SmartDataframe(df_master, config={"llm": llm, "enforce_privacy": True, "enable_cache": True})
     
-    # Enforce privacy so it doesn't send your raw customer rows to the API
-    sdf = SmartDataframe(df_master, config={
-        "llm": llm, 
-        "enforce_privacy": True, 
-        "enable_cache": True
-    })
-    
-    st.info("💡 **Tip:** Ask specific data questions like 'What is the total revenue for Females?' (Avoid conversational greetings like 'Hi').")
-    
-    if prompt := st.chat_input("Ask me a specific question about your audience data..."):
+    st.info("💡 **Tip:** Ask specific questions like 'What is the total revenue for Females?'")
+    if prompt := st.chat_input("Ask me about your audience..."):
         with st.chat_message("user"): st.markdown(prompt)
         with st.chat_message("assistant"): 
-            with st.spinner("Writing code to query your data..."):
+            with st.spinner("Crunching data..."):
                 try:
                     response = sdf.chat(prompt)
-                    # Safety net: If PandasAI returns nothing, tell the user gracefully.
                     if response is None or str(response).strip() == "":
-                        st.warning("I couldn't calculate that. Try rephrasing your question to be more specific about the columns (e.g., 'Visitors', 'Revenue', 'Gender').")
+                        st.warning("I couldn't calculate that. Try rephrasing your question.")
                     else:
                         st.markdown(response)
                 except Exception as e:
-                    st.error(f"Error calculating data: {e}. If this persists, your Google API key may be out of quota.")
+                    st.error(f"Error: {e}")
