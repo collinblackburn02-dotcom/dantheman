@@ -24,7 +24,12 @@ def load_data():
 
 df_master = load_data()
 
-# ================ Global Controls =================
+# Bulletproof Sorting Maps
+INCOME_MAP = {'$0-$59,999': 1, '$60,000-$99,999': 2, '$100,000-$199,999': 3, '$200,000+': 4}
+NET_WORTH_MAP = {'$49,999 and below': 1, '$50,000-$99,999': 2, '$100,000-$249,999': 3, '$250,000-$499,999': 4, '$500,000-$999,999': 5, '$1,000,000+': 6}
+CREDIT_MAP = {'High (A, B, C)': 1, 'Medium (D, E)': 2, 'Low (F, G)': 3}
+
+# ================ Global Sidebar =================
 with st.sidebar:
     st.header("Global Controls")
     metric_choice = st.radio("Primary Metric", ["Rev/Visitor", "Conv %", "Revenue", "Purchases", "Visitors"])
@@ -34,60 +39,9 @@ with st.sidebar:
 st.title("🪵 Audience Insights Engine")
 metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue", "Visitors": "Visitors", "Rev/Visitor": "Rev/Visitor"}
 
-# ================ 1. Single Variable Deep Dive =================
-st.subheader("🔍 Single Variable Deep Dive")
-single_var_options = {"Gender": "gender", "Age": "age", "Income": "income", "Region": "region", "Net Worth": "net_worth", "Children": "children", "Marital Status": "marital_status", "Homeowner": "homeowner", "Credit Rating": "credit_rating"}
-
-if "active_single_var" not in st.session_state: st.session_state.active_single_var = "Gender"
-var_cols = st.columns(len(single_var_options))
-for i, label in enumerate(single_var_options.keys()):
-    if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_single_var == label else "secondary", use_container_width=True):
-        st.session_state.active_single_var = label
-        st.rerun()
-
-selected_col = single_var_options[st.session_state.active_single_var]
-
-df_clean_single = df_master[~df_master[selected_col].isin(['Unknown', 'U', ''])]
-
-df_single = df_clean_single.groupby([selected_col]).agg(
-    Visitors=('total_visitors', 'sum'), 
-    Purchases=('total_purchasers', 'sum'), 
-    Revenue=('total_revenue', 'sum')
-).reset_index()
-
-if not df_single.empty:
-    df_single['Conv %'] = (df_single['Purchases'] / df_single['Visitors'] * 100).round(2)
-    df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
-    df_single = df_single[df_single['Visitors'] >= min_visitors]
-    
-    # Custom Categorical Sorting
-    is_bucketed = selected_col in ['income', 'net_worth', 'credit_rating']
-    if selected_col == 'income':
-        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+'], ordered=True)
-    elif selected_col == 'net_worth':
-        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+'], ordered=True)
-    elif selected_col == 'credit_rating':
-        df_single[selected_col] = pd.Categorical(df_single[selected_col], categories=['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)'], ordered=True)
-    
-    # THE FIX: Proper sorting logic
-    if is_bucketed:
-        df_single = df_single.sort_values(selected_col, ascending=True)
-    else:
-        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
-    
-    display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
-    
-    # THE FIX: Added hide_index=True to remove the 0/1 column
-    st.dataframe(
-        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), 
-        use_container_width=True,
-        hide_index=True 
-    )
-
-st.markdown("---")
-
-# ================ 2. Multi-Variable Combination Analysis =================
-st.subheader("📊 Multi-Variable Combination Analysis")
+# ================ 1. Master Audience Filters =================
+st.subheader("🎛️ Master Audience Filters")
+st.info("Dropdown filters applied here will globally update all tables below.")
 
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
 selected_filters, included_types = {}, []
@@ -100,23 +54,79 @@ for i, (label, col_name) in enumerate(configs):
             
             opts = [x for x in df_master[col_name].unique() if x not in ['Unknown', 'U', '']]
             
-            if col_name == 'income': sort_order = ['$0-$59,999', '$60,000-$99,999', '$100,000-$199,999', '$200,000+']
-            elif col_name == 'net_worth': sort_order = ['$49,999 and below', '$50,000-$99,999', '$100,000-$249,999', '$250,000-$499,999', '$500,000-$999,999', '$1,000,000+']
-            elif col_name == 'credit_rating': sort_order = ['High (A, B, C)', 'Medium (D, E)', 'Low (F, G)']
-            else: sort_order = sorted(opts)
-            
-            if col_name in ['income', 'net_worth', 'credit_rating']:
-                opts = sorted(opts, key=lambda x: sort_order.index(x) if x in sort_order else 99)
-            else:
-                opts = sorted(opts)
+            # Sort Dropdown options logically
+            if col_name == 'income': opts = sorted(opts, key=lambda x: INCOME_MAP.get(x, 99))
+            elif col_name == 'net_worth': opts = sorted(opts, key=lambda x: NET_WORTH_MAP.get(x, 99))
+            elif col_name == 'credit_rating': opts = sorted(opts, key=lambda x: CREDIT_MAP.get(x, 99))
+            else: opts = sorted(opts)
 
             val = st.multiselect(f"Filter {label}", opts, key=f"f_{col_name}")
             if is_inc: included_types.append(col_name)
             if val: selected_filters[col_name] = val
 
+# GLOBALLY FILTER THE DATA FOR BOTH SECTIONS
 dff = df_master.copy()
 for col, vals in selected_filters.items(): 
     dff = dff[dff[col].isin(vals)]
+
+st.markdown("---")
+
+# ================ 2. Single Variable Deep Dive =================
+st.subheader("🔍 Single Variable Deep Dive")
+single_var_options = {"Gender": "gender", "Age": "age", "Income": "income", "Region": "region", "Net Worth": "net_worth", "Children": "children", "Marital Status": "marital_status", "Homeowner": "homeowner", "Credit Rating": "credit_rating"}
+
+if "active_single_var" not in st.session_state: st.session_state.active_single_var = "Gender"
+var_cols = st.columns(len(single_var_options))
+for i, label in enumerate(single_var_options.keys()):
+    if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_single_var == label else "secondary", use_container_width=True):
+        st.session_state.active_single_var = label
+        st.rerun()
+
+selected_col = single_var_options[st.session_state.active_single_var]
+
+# Use the globally filtered 'dff' data here
+df_clean_single = dff[~dff[selected_col].isin(['Unknown', 'U', ''])]
+
+df_single = df_clean_single.groupby([selected_col]).agg(
+    Visitors=('total_visitors', 'sum'), 
+    Purchases=('total_purchasers', 'sum'), 
+    Revenue=('total_revenue', 'sum')
+).reset_index()
+
+if not df_single.empty:
+    df_single['Conv %'] = (df_single['Purchases'] / df_single['Visitors'] * 100).round(2)
+    df_single['Rev/Visitor'] = (df_single['Revenue'] / df_single['Visitors']).round(2)
+    df_single = df_single[df_single['Visitors'] >= min_visitors]
+    
+    # THE FIX: Bulletproof integer sorting
+    if selected_col == 'income':
+        df_single['_sort'] = df_single[selected_col].map(INCOME_MAP)
+        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
+    elif selected_col == 'net_worth':
+        df_single['_sort'] = df_single[selected_col].map(NET_WORTH_MAP)
+        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
+    elif selected_col == 'credit_rating':
+        df_single['_sort'] = df_single[selected_col].map(CREDIT_MAP)
+        df_single = df_single.sort_values('_sort').drop(columns=['_sort'])
+    else:
+        # Default metric sorting
+        df_single = df_single.sort_values(metric_map[metric_choice], ascending=False)
+    
+    display_df = df_single.rename(columns={selected_col: st.session_state.active_single_var})
+    
+    # THE FIX: hide_index=True added to remove the 0/1 column
+    st.dataframe(
+        display_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), 
+        use_container_width=True, 
+        hide_index=True
+    )
+else:
+    st.info("No data available for this variable with the current filters and traffic floor.")
+
+st.markdown("---")
+
+# ================ 3. Multi-Variable Combination Analysis =================
+st.subheader("📊 Multi-Variable Combination Analysis")
 
 if included_types and not dff.empty:
     combos = []
@@ -164,16 +174,16 @@ if included_types and not dff.empty:
         if final_res.empty:
             st.warning(f"No combinations met the Traffic Floor minimum of {min_visitors}.")
         else:
-            # THE FIX: Added hide_index=True to the Multi-Variable table as well
+            # THE FIX: hide_index=True added here as well
             st.dataframe(
                 final_res[ordered_cols].rename(columns=rename_dict).style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap='YlGn'), 
-                use_container_width=True,
+                use_container_width=True, 
                 hide_index=True
             )
 elif not included_types:
-    st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
+    st.info("👆 Check the 'Inc' boxes in the Master Filters above to build your combination matrix.")
 
-# ================ 3. AI Data Agent =================
+# ================ 4. AI Data Agent =================
 st.markdown("---")
 st.subheader("🤖 Heavenly AI Data Agent")
 if "GEMINI_API_KEY" in st.secrets:
