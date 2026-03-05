@@ -223,7 +223,30 @@ if included_types and not dff.empty:
                 hide_index=True
             )
 elif not included_types:
-    st.info("👆 Check the 'Inc' boxes to build your combination matrix.")
+    st.info("👆 Check the 'Inc' boxes above to build your combination matrix, or view your baseline totals below:")
+    
+    # Calculate the summary stats based on the current dropdown filters
+    total_vis = dff['total_visitors'].sum()
+    total_purch = dff['total_purchasers'].sum()
+    total_rev = dff['total_revenue'].sum()
+    
+    if total_vis >= min_visitors:
+        summary_df = pd.DataFrame([{
+            "Audience Segment": "Overall Filtered Baseline",
+            "Visitors": total_vis, 
+            "Purchases": total_purch, 
+            "Revenue": total_rev,
+            "Conv %": (total_purch / total_vis * 100).round(2) if total_vis > 0 else 0,
+            "Rev/Visitor": (total_rev / total_vis).round(2) if total_vis > 0 else 0
+        }])
+        
+        st.dataframe(
+            summary_df.style.format({'Conv %': '{:.2f}%', 'Revenue': '${:,.2f}', 'Rev/Visitor': '${:,.2f}'}), 
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.warning(f"Not enough traffic to meet the Minimum Floor of {min_visitors}.")
 
 # ================ 6. AI Data Agent =================
 st.markdown("<hr>", unsafe_allow_html=True)
