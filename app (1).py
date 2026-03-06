@@ -18,8 +18,12 @@ if "df_icp" not in st.session_state: st.session_state.df_icp = None
 if "df_visitors" not in st.session_state: st.session_state.df_visitors = None
 if "brand_color" not in st.session_state: st.session_state.brand_color = "#B3845C"
 if "brand_logo" not in st.session_state: st.session_state.brand_logo = None
+if "scraped_url" not in st.session_state: st.session_state.scraped_url = "" # New gatekeeper state
 
 def apply_custom_theme(primary_color):
+    # Ensure a valid hex if the website returns something weird
+    if not primary_color or len(primary_color) < 4: primary_color = "#B3845C" 
+    
     st.markdown(f"""
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
@@ -84,10 +88,8 @@ def get_bq_client():
 
 @st.cache_data(ttl=600)
 def load_visitor_base():
-    """Loads ONLY the total visitor counts from the old table to act as our baseline denominator."""
     client = get_bq_client()
     df = client.query("SELECT gender, age, income, region, net_worth, children, marital_status, homeowner, credit_rating, total_visitors FROM `xenon-mantis-430216-n4.final_dashboard.demographic_leaderboard`").to_dataframe()
-    # Align strings to match raw pixel data (replace "-" with " to ", trim spaces)
     demo_cols = ["gender", "age", "income", "region", "net_worth", "children", "marital_status", "homeowner", "credit_rating"]
     for col in demo_cols:
         if col in df.columns:
@@ -107,7 +109,10 @@ if st.session_state.app_state == "onboarding":
     with col2:
         st.markdown("### 1. Brand Your App (Optional)")
         website_url = st.text_input("🔗 What is your website URL?", placeholder="https://www.yourstore.com")
-        if website_url:
+        
+        # Only scrape if the URL has actually changed
+        if website_url and website_url != st.session_state.scraped_url:
+            st.session_state.scraped_url = website_url
             if not website_url.startswith('http'): website_url = 'https://' + website_url
             with st.spinner("Extracting brand DNA..."):
                 try:
@@ -115,20 +120,28 @@ if st.session_state.app_state == "onboarding":
                     r = requests.get(website_url, headers=headers, timeout=5)
                     soup = BeautifulSoup(r.text, 'html.parser')
                     color_meta = soup.find('meta', attrs={'name': 'theme-color'})
-                    if color_meta:
+                    if color_meta and color_meta.get('content'):
                         st.session_state.brand_color = color_meta['content']
-                        st.success(f"🎨 Brand color extracted: {st.session_state.brand_color}")
-                        st.rerun()
+                    st.rerun() # Safe to rerun now because scraped_url prevents infinite loop
                 except Exception:
-                    st.warning("Could not extract branding automatically. Using default.")
+                    pass # Fail silently
+        
+        # Display the extracted color securely
+        if website_url == st.session_state.scraped_url and st.session_state.brand_color != "#B3845C":
+             st.success(f"🎨 Brand color extracted: **{st.session_state.brand_color}**")
         
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("### 2. Upload Order Data")
-        st.info("📦 **Required exactly:** `Date`, `Email`, `Order ID`, `Total`")
+        st.info("📦 **Required exactly:** `Date`, `Email`, `Order ID`, `Total` (Shopify exports work automatically!)")
         uploaded_file = st.file_uploader("Upload Orders CSV", type=["csv"], label_visibility="collapsed")
 
         if uploaded_file is not None:
             df_orders = pd.read_csv(uploaded_file)
+            
+            # --- SHOPIFY AUTO-MAPPER ---
+            shopify_map = {'Name': 'Order ID', 'Created at': 'Date'}
+            df_orders = df_orders.rename(columns=shopify_map)
+            
             required_cols = ["Date", "Email", "Order ID", "Total"]
             missing_cols = [col for col in required_cols if col not in df_orders.columns]
             
@@ -137,7 +150,6 @@ if st.session_state.app_state == "onboarding":
             else:
                 with st.spinner("Pushing orders to BigQuery and matching pixels..."):
                     try:
-                        # CLEAN TOTAL BEFORE UPLOAD TO PREVENT BQ ERRORS
                         df_orders['Total'] = df_orders['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True)
                         df_orders['Total'] = pd.to_numeric(df_orders['Total'], errors='coerce').fillna(0)
                         
@@ -168,19 +180,14 @@ if st.session_state.app_state == "onboarding":
                                OR LOWER(p.BUSINESS_EMAIL) = LOWER(o.Email)
                         """
                         df_joined = client.query(query).to_dataframe()
-                        
-                        # 🛑 CRITICAL FIX: Deduplicate Cartesian Joins! 1 Order = 1 Row.
                         df_joined = df_joined.drop_duplicates(subset=['Order_ID'], keep='first')
                         
-                        # Clean demographic columns so they match phase 1 formatting
                         demo_cols = [c[1] for c in configs]
                         for col in demo_cols:
                             if col in df_joined.columns:
                                 df_joined[col] = df_joined[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown')
-                                # Ensure strings match identically for accurate % math
                                 df_joined[col] = df_joined[col].str.replace(' to ', '-', regex=False).str.strip()
                         
-                        # Save to memory and unlock dashboard
                         st.session_state.df_icp = df_joined
                         st.session_state.df_visitors = load_visitor_base()
                         st.session_state.app_state = "dashboard"
@@ -192,7 +199,6 @@ if st.session_state.app_state == "onboarding":
 # ================ 4. STATE 2: LIVE DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
     
-    # --- Sidebar ---
     with st.sidebar:
         if st.session_state.brand_logo:
             st.image(st.session_state.brand_logo, use_container_width=True)
@@ -210,11 +216,10 @@ elif st.session_state.app_state == "dashboard":
         st.markdown("<br><br>", unsafe_allow_html=True)
         if st.button("🔄 Upload New Orders", use_container_width=True): 
             st.session_state.app_state = "onboarding"
-            st.session_state.brand_color = "#B3845C" # Reset to default
+            st.session_state.scraped_url = "" # Reset memory
             st.rerun()
 
     metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue", "Visitors": "Visitors", "Rev/Visitor": "Rev/Visitor"}
-
     tab1, tab2 = st.tabs(["📊 Conversion Insights", "🧬 Customer DNA (ICP)"])
 
     # ---------------- TAB 1: CONVERSION INSIGHTS ----------------
@@ -251,7 +256,6 @@ elif st.session_state.app_state == "dashboard":
 
         st.markdown("<hr>", unsafe_allow_html=True)
         
-        # Predictive Power Drivers
         st.subheader("🏆 Top Conversion Drivers")
         predictive_data = []
         for label, col_name in configs:
@@ -275,8 +279,6 @@ elif st.session_state.app_state == "dashboard":
             render_premium_table(styler)
 
         st.markdown("<hr>", unsafe_allow_html=True)
-
-        # 🛑 RESTORED: Multi-Variable Matrix
         st.subheader("📊 Multi-Variable Combination Matrix")
 
         with st.expander("🎛️ Combination Filters", expanded=True):
@@ -327,10 +329,8 @@ elif st.session_state.app_state == "dashboard":
             for r in range(1, max_combo_size + 1):
                 for subset in itertools.combinations(included_types, r):
                     sub_cols = list(subset)
+                    temp_v, temp_p = dff_v.copy(), dff_p.copy()
                     
-                    # Remove Unknowns for this specific slice
-                    temp_v = dff_v.copy()
-                    temp_p = dff_p.copy()
                     for col in sub_cols:
                         temp_v = temp_v[~temp_v[col].isin(['Unknown', 'U', ''])]
                         temp_p = temp_p[~temp_p[col].isin(['Unknown', 'U', ''])]
@@ -339,13 +339,11 @@ elif st.session_state.app_state == "dashboard":
                         
                     grp_v = temp_v.groupby(sub_cols)['total_visitors'].sum().reset_index()
                     grp_p = temp_p.groupby(sub_cols).agg(Purchases=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
-                    
                     grp = pd.merge(grp_v, grp_p, on=sub_cols, how='left').fillna(0).rename(columns={'total_visitors': 'Visitors'})
                     
                     for col in included_types:
                         if col not in sub_cols:
                             grp[col] = ", ".join(selected_filters[col]) if col in selected_filters and selected_filters[col] else ""
-                            
                     combos.append(grp)
                     
             if combos:
@@ -354,7 +352,6 @@ elif st.session_state.app_state == "dashboard":
                 res['Rev/Visitor'] = (res['Revenue'] / res['Visitors']).round(2)
                 
                 final_res = res[res['Visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=is_ascending)
-                
                 ordered_cols = included_types + ["Visitors", "Purchases", "Revenue", "Conv %", "Rev/Visitor"]
                 rename_dict = {c[1]: c[0] for c in configs}
                 
@@ -370,8 +367,6 @@ elif st.session_state.app_state == "dashboard":
         st.markdown('<p style="color: #666; margin-top: -5px; margin-bottom: 30px;">Demographic DNA of your actual paying customers.</p>', unsafe_allow_html=True)
         
         df_joined = st.session_state.df_icp
-        
-        # KPIs
         total_buyers = df_joined['Email'].nunique()
         total_rev = df_joined['Total'].sum()
         overall_aov = total_rev / total_buyers if total_buyers > 0 else 0
@@ -382,7 +377,6 @@ elif st.session_state.app_state == "dashboard":
         m3.metric("Overall Average Order Value", f"${overall_aov:,.2f}")
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Distribution Tables
         dash_col1, dash_col2 = st.columns(2)
         for index, (label, col_name) in enumerate(configs):
             grp = df_joined.groupby(col_name).agg(Buyers=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
@@ -401,5 +395,4 @@ elif st.session_state.app_state == "dashboard":
                     st.subheader(f"{label} Distribution")
                     render_premium_table(styler)
 
-# Prevent auto-scroll
 components.html("<script>setTimeout(function() { window.parent.document.querySelector('.main').scrollTo(0, 0); }, 100);</script>", height=0)
