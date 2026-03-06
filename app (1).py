@@ -21,7 +21,7 @@ if "brand_logo" not in st.session_state: st.session_state.brand_logo = None
 if "scraped_url" not in st.session_state: st.session_state.scraped_url = ""
 
 # Master exclusion list for empty/null demographic segments
-EXCLUDE_LIST = ['Unknown', 'U', '', 'None', 'nan', 'NaN', 'null', 'NULL']
+EXCLUDE_LIST = ['Unknown', 'U', '', 'None', 'nan', 'NaN', 'null', 'NULL', '<NA>']
 
 def apply_custom_theme(primary_color):
     if not primary_color or len(primary_color) < 4: primary_color = "#B3845C" 
@@ -81,8 +81,14 @@ def get_bq_client():
     return bigquery.Client(credentials=service_account.Credentials.from_service_account_info(creds_dict), project=creds_dict["project_id"])
 
 def clean_demographics(df):
-    """Universal mapper to ensure pixel data perfectly matches your custom Phase 1 groupings"""
-    df = df.fillna("Unknown").replace(["", "nan", "NaN", "None", "null", "NULL"], "Unknown")
+    """Universal mapper to safely ensure pixel data matches your custom Phase 1 groupings"""
+    demo_cols = ["gender", "age", "income", "region", "net_worth", "children", "marital_status", "homeowner", "credit_rating"]
+    
+    # Safely convert JUST the demographic columns to strings to prevent Boolean traps
+    for col in demo_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+            df[col] = df[col].replace(["", "nan", "NaN", "None", "null", "NULL", "<NA>"], "Unknown")
     
     if 'credit_rating' in df.columns:
         df['credit_rating'] = df['credit_rating'].replace({
@@ -91,11 +97,11 @@ def clean_demographics(df):
             'F': 'Low (F, G)', 'G': 'Low (F, G)'
         })
     if 'children' in df.columns:
-        df['children'] = df['children'].replace({'True': 'Y', 'False': 'N', True: 'Y', False: 'N'})
+        df['children'] = df['children'].replace({'True': 'Y', 'False': 'N'})
     if 'marital_status' in df.columns:
-        df['marital_status'] = df['marital_status'].replace({'True': 'Married', 'False': 'Single', True: 'Married', False: 'Single'})
+        df['marital_status'] = df['marital_status'].replace({'True': 'Married', 'False': 'Single'})
     if 'homeowner' in df.columns:
-        df['homeowner'] = df['homeowner'].replace({'True': 'Homeowner', 'False': 'Renter', True: 'Homeowner', False: 'Renter'})
+        df['homeowner'] = df['homeowner'].replace({'True': 'Homeowner', 'False': 'Renter'})
     
     if 'income' in df.columns: df['income'] = df['income'].str.replace(' to ', '-', regex=False).str.strip()
     if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].str.replace(' to ', '-', regex=False).str.strip()
@@ -105,8 +111,8 @@ def clean_demographics(df):
 @st.cache_data(ttl=600)
 def load_visitor_base():
     """ 
-    CRITICAL FIX: Queries the RAW pixel table directly, counting UNIQUE UUIDs 
-    to lock the visitor denominator to the true 56k count. NO LEADERBOARD USED.
+    Queries the RAW pixel table directly, counting UNIQUE UUIDs 
+    to lock the visitor denominator to the true 56k count.
     """
     client = get_bq_client()
     query = """
@@ -215,7 +221,7 @@ if st.session_state.app_state == "onboarding":
                         df_joined = client.query(query).to_dataframe()
                         df_joined = df_joined.drop_duplicates(subset=['Order_ID'], keep='first')
                         
-                        # Apply universal mapper to match baseline
+                        # Apply universal mapper safely
                         df_joined = clean_demographics(df_joined)
                         
                         st.session_state.df_icp = df_joined
