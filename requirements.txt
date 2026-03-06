@@ -9,3 +9,5 @@ google-generativeai
 PyYAML
 langchain
 langchain-google-genai
+requests
+beautifulsoup4
