@@ -3,6 +3,7 @@ import pandas as pd
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import os
+import itertools
 import matplotlib.colors as mcolors
 import streamlit.components.v1 as components
 import requests
@@ -64,7 +65,7 @@ def apply_custom_theme(primary_color):
 
 apply_custom_theme(st.session_state.brand_color)
 
-# Soft Green Colormap
+# Soft Colormaps
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 custom_tan_reversed = mcolors.LinearSegmentedColormap.from_list("custom_tan_r", ["#B3845C", "#E2D7C8", "#F9F7F3"])
 
@@ -86,9 +87,16 @@ def load_visitor_base():
     """Loads ONLY the total visitor counts from the old table to act as our baseline denominator."""
     client = get_bq_client()
     df = client.query("SELECT gender, age, income, region, net_worth, children, marital_status, homeowner, credit_rating, total_visitors FROM `xenon-mantis-430216-n4.final_dashboard.demographic_leaderboard`").to_dataframe()
+    # Align strings to match raw pixel data (replace "-" with " to ", trim spaces)
+    demo_cols = ["gender", "age", "income", "region", "net_worth", "children", "marital_status", "homeowner", "credit_rating"]
+    for col in demo_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.replace(' to ', '-', regex=False).str.strip()
     return df.fillna("Unknown").replace("", "Unknown")
 
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
+INCOME_MAP = {'$0-$59,999': 1, '$60,000-$99,999': 2, '$100,000-$199,999': 3, '$200,000+': 4}
+NET_WORTH_MAP = {'$49,999 and below': 1, '$50,000-$99,999': 2, '$100,000-$249,999': 3, '$250,000-$499,999': 4, '$500,000-$999,999': 5, '$1,000,000+': 6}
 
 # ================ 3. STATE 1: ONBOARDING SCREEN =================
 if st.session_state.app_state == "onboarding":
@@ -129,6 +137,10 @@ if st.session_state.app_state == "onboarding":
             else:
                 with st.spinner("Pushing orders to BigQuery and matching pixels..."):
                     try:
+                        # CLEAN TOTAL BEFORE UPLOAD TO PREVENT BQ ERRORS
+                        df_orders['Total'] = df_orders['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True)
+                        df_orders['Total'] = pd.to_numeric(df_orders['Total'], errors='coerce').fillna(0)
+                        
                         client = get_bq_client()
                         project_id = dict(st.secrets["gcp_service_account"])["project_id"]
                         temp_table_id = f"{project_id}.final_dashboard.streamlit_temp_orders"
@@ -157,15 +169,16 @@ if st.session_state.app_state == "onboarding":
                         """
                         df_joined = client.query(query).to_dataframe()
                         
-                        # Clean currency and convert to numeric
-                        df_joined['Total'] = df_joined['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True)
-                        df_joined['Total'] = pd.to_numeric(df_joined['Total'], errors='coerce').fillna(0)
+                        # 🛑 CRITICAL FIX: Deduplicate Cartesian Joins! 1 Order = 1 Row.
+                        df_joined = df_joined.drop_duplicates(subset=['Order_ID'], keep='first')
                         
-                        # Clean demographic columns
+                        # Clean demographic columns so they match phase 1 formatting
                         demo_cols = [c[1] for c in configs]
                         for col in demo_cols:
                             if col in df_joined.columns:
                                 df_joined[col] = df_joined[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown')
+                                # Ensure strings match identically for accurate % math
+                                df_joined[col] = df_joined[col].str.replace(' to ', '-', regex=False).str.strip()
                         
                         # Save to memory and unlock dashboard
                         st.session_state.df_icp = df_joined
@@ -204,7 +217,7 @@ elif st.session_state.app_state == "dashboard":
 
     tab1, tab2 = st.tabs(["📊 Conversion Insights", "🧬 Customer DNA (ICP)"])
 
-    # ---------------- TAB 1: CONVERSION INSIGHTS (Dynamic) ----------------
+    # ---------------- TAB 1: CONVERSION INSIGHTS ----------------
     with tab1:
         st.markdown('<p style="font-size: 2rem; font-weight: 700; margin-bottom: 0px;">Audience Insights Engine</p>', unsafe_allow_html=True)
         st.markdown('<p style="color: #666; margin-top: -5px; margin-bottom: 30px;">Traffic and Conversion Optimization</p>', unsafe_allow_html=True)
@@ -219,15 +232,12 @@ elif st.session_state.app_state == "dashboard":
                 
         selected_col = dict(configs)[st.session_state.active_single_var]
         
-        # Pull static visitors
         df_v = st.session_state.df_visitors[~st.session_state.df_visitors[selected_col].isin(['Unknown', 'U', ''])]
         df_v_grp = df_v.groupby(selected_col)['total_visitors'].sum().reset_index().rename(columns={'total_visitors': 'Visitors'})
         
-        # Pull dynamic purchases from uploaded CSV
         df_p = st.session_state.df_icp[~st.session_state.df_icp[selected_col].isin(['Unknown', 'U', ''])]
-        df_p_grp = df_p.groupby(selected_col).agg(Purchases=('Email', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+        df_p_grp = df_p.groupby(selected_col).agg(Purchases=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
         
-        # Merge them together
         df_merged = pd.merge(df_v_grp, df_p_grp, on=selected_col, how='left').fillna(0)
 
         if not df_merged.empty:
@@ -241,7 +251,7 @@ elif st.session_state.app_state == "dashboard":
 
         st.markdown("<hr>", unsafe_allow_html=True)
         
-        # Predictive Power Drivers (Dynamic)
+        # Predictive Power Drivers
         st.subheader("🏆 Top Conversion Drivers")
         predictive_data = []
         for label, col_name in configs:
@@ -249,7 +259,7 @@ elif st.session_state.app_state == "dashboard":
             grp_v = df_v_sub.groupby(col_name)['total_visitors'].sum().reset_index()
             
             df_p_sub = st.session_state.df_icp[~st.session_state.df_icp[col_name].isin(['Unknown', 'U', ''])]
-            grp_p = df_p_sub.groupby(col_name).agg(Purchases=('Email', 'nunique')).reset_index()
+            grp_p = df_p_sub.groupby(col_name).agg(Purchases=('Order_ID', 'nunique')).reset_index()
             
             grp = pd.merge(grp_v, grp_p, on=col_name, how='left').fillna(0).rename(columns={'total_visitors': 'Visitors'})
             grp = grp[grp['Visitors'] >= min_visitors]
@@ -263,6 +273,96 @@ elif st.session_state.app_state == "dashboard":
             pred_df = pd.DataFrame(predictive_data).sort_values("Predictive Swing", ascending=is_ascending)
             styler = pred_df.style.format({'Conv % (Top)': '{:.2f}%', 'Conv % (Worst)': '{:.2f}%', 'Predictive Swing': '{:.2f}%'}).background_gradient(subset=['Predictive Swing', 'Conv % (Top)'], cmap=custom_light_green).background_gradient(subset=['Conv % (Worst)'], cmap=custom_tan_reversed)
             render_premium_table(styler)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # 🛑 RESTORED: Multi-Variable Matrix
+        st.subheader("📊 Multi-Variable Combination Matrix")
+
+        with st.expander("🎛️ Combination Filters", expanded=True):
+            selected_filters, included_types = {}, []
+            filter_cols = st.columns(3)
+
+            for i, (label, col_name) in enumerate(configs):
+                with filter_cols[i % 3]:
+                    c_title, c_inc = st.columns([3, 1])
+                    c_title.markdown(f'<p style="font-weight: 600; color: {st.session_state.brand_color}; margin-bottom: 0;">{label}</p>', unsafe_allow_html=True)
+                    is_inc = c_inc.checkbox("Inc", key=f"inc_{col_name}", help=f"Include {label}")
+                    
+                    opts = [x for x in st.session_state.df_visitors[col_name].unique() if x not in ['Unknown', 'U', '']]
+                    if col_name == 'income': opts = sorted(opts, key=lambda x: INCOME_MAP.get(x, 99))
+                    elif col_name == 'net_worth': opts = sorted(opts, key=lambda x: NET_WORTH_MAP.get(x, 99))
+                    else: opts = sorted(opts)
+
+                    val = st.multiselect(f"Filter {label}", opts, key=f"f_{col_name}", label_visibility="collapsed", placeholder="All")
+                    if is_inc: included_types.append(col_name)
+                    if val: selected_filters[col_name] = val
+
+        dff_v = st.session_state.df_visitors.copy()
+        dff_p = st.session_state.df_icp.copy()
+        
+        for col, vals in selected_filters.items(): 
+            dff_v = dff_v[dff_v[col].isin(vals)]
+            dff_p = dff_p[dff_p[col].isin(vals)]
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if not dff_v.empty and (selected_filters or included_types):
+            total_vis = dff_v['total_visitors'].sum()
+            total_purch = dff_p['Order_ID'].nunique()
+            total_rev = dff_p['Total'].sum()
+            avg_conv = (total_purch / total_vis * 100) if total_vis > 0 else 0
+            avg_rev_vis = (total_rev / total_vis) if total_vis > 0 else 0
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Filtered Segment Visitors", f"{total_vis:,.0f}")
+            m2.metric("Segment Purchases", f"{total_purch:,.0f}")
+            m3.metric("Segment Conv Rate", f"{avg_conv:.2f}%")
+            m4.metric("Segment Rev / Visitor", f"${avg_rev_vis:,.2f}")
+            st.markdown("<br>", unsafe_allow_html=True)
+
+        if included_types and not dff_v.empty:
+            combos = []
+            max_combo_size = min(3, len(included_types))
+            
+            for r in range(1, max_combo_size + 1):
+                for subset in itertools.combinations(included_types, r):
+                    sub_cols = list(subset)
+                    
+                    # Remove Unknowns for this specific slice
+                    temp_v = dff_v.copy()
+                    temp_p = dff_p.copy()
+                    for col in sub_cols:
+                        temp_v = temp_v[~temp_v[col].isin(['Unknown', 'U', ''])]
+                        temp_p = temp_p[~temp_p[col].isin(['Unknown', 'U', ''])]
+                        
+                    if temp_v.empty: continue
+                        
+                    grp_v = temp_v.groupby(sub_cols)['total_visitors'].sum().reset_index()
+                    grp_p = temp_p.groupby(sub_cols).agg(Purchases=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+                    
+                    grp = pd.merge(grp_v, grp_p, on=sub_cols, how='left').fillna(0).rename(columns={'total_visitors': 'Visitors'})
+                    
+                    for col in included_types:
+                        if col not in sub_cols:
+                            grp[col] = ", ".join(selected_filters[col]) if col in selected_filters and selected_filters[col] else ""
+                            
+                    combos.append(grp)
+                    
+            if combos:
+                res = pd.concat(combos, ignore_index=True).drop_duplicates(subset=included_types)
+                res['Conv %'] = (res['Purchases'] / res['Visitors'] * 100).round(2)
+                res['Rev/Visitor'] = (res['Revenue'] / res['Visitors']).round(2)
+                
+                final_res = res[res['Visitors'] >= min_visitors].sort_values(metric_map[metric_choice], ascending=is_ascending)
+                
+                ordered_cols = included_types + ["Visitors", "Purchases", "Revenue", "Conv %", "Rev/Visitor"]
+                rename_dict = {c[1]: c[0] for c in configs}
+                
+                if final_res.empty:
+                    st.warning(f"No combinations met the Traffic Floor minimum.")
+                else:
+                    styler = final_res.head(50)[ordered_cols].rename(columns=rename_dict).style.format({'Visitors': '{:,.0f}', 'Purchases': '{:,.0f}', 'Revenue': '${:,.2f}', 'Conv %': '{:.2f}%', 'Rev/Visitor': '${:,.2f}'}).background_gradient(subset=['Rev/Visitor', 'Conv %'], cmap=custom_light_green)
+                    render_premium_table(styler)
 
     # ---------------- TAB 2: CUSTOMER DNA (ICP) ----------------
     with tab2:
@@ -285,7 +385,7 @@ elif st.session_state.app_state == "dashboard":
         # Distribution Tables
         dash_col1, dash_col2 = st.columns(2)
         for index, (label, col_name) in enumerate(configs):
-            grp = df_joined.groupby(col_name).agg(Buyers=('Email', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+            grp = df_joined.groupby(col_name).agg(Buyers=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             grp = grp[grp[col_name] != "Unknown"]
             
             if not grp.empty:
