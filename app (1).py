@@ -18,10 +18,12 @@ if "df_icp" not in st.session_state: st.session_state.df_icp = None
 if "df_visitors" not in st.session_state: st.session_state.df_visitors = None
 if "brand_color" not in st.session_state: st.session_state.brand_color = "#B3845C"
 if "brand_logo" not in st.session_state: st.session_state.brand_logo = None
-if "scraped_url" not in st.session_state: st.session_state.scraped_url = "" # New gatekeeper state
+if "scraped_url" not in st.session_state: st.session_state.scraped_url = ""
+
+# Master exclusion list for empty/null demographic segments
+EXCLUDE_LIST = ['Unknown', 'U', '', 'None', 'nan', 'NaN', 'null', 'NULL']
 
 def apply_custom_theme(primary_color):
-    # Ensure a valid hex if the website returns something weird
     if not primary_color or len(primary_color) < 4: primary_color = "#B3845C" 
     
     st.markdown(f"""
@@ -30,46 +32,38 @@ def apply_custom_theme(primary_color):
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             
-            /* === SLIMMER SIDEBAR === */
             [data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid #E2D7C8; min-width: 275px !important; max-width: 275px !important; }}
             
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
             p, span, label, .stRadio label, .stTabs [data-baseweb="tab"] {{ color: #2D2421 !important; }}
             
-            /* Sleek Buttons */
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; transition: all 0.2s ease-in-out; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button, div[data-testid="stButton"] button p {{ font-size: 0.85rem !important; white-space: nowrap !important; overflow: visible !important; }}
             
-            /* Primary Button styled with Dynamic Brand Color */
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; box-shadow: 0 4px 6px rgba(0,0,0, 0.1); }}
             div[data-testid="stButton"] button[kind="primary"] p {{ font-weight: 800 !important; color: #FFFFFF !important; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
             
-            /* Metric Cards */
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px 24px; box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04); }}
             [data-testid="stMetricLabel"] {{ color: {primary_color} !important; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.85rem; }}
             [data-testid="stMetricValue"] {{ color: #2D2421 !important; font-weight: 700; font-size: 2.2rem; }}
             
-            /* Tabs styling */
             .stTabs [data-baseweb="tab-list"] {{ gap: 24px; }}
             .stTabs [data-baseweb="tab"] {{ font-weight: 600; padding-bottom: 10px; }}
             .stTabs [aria-selected="true"] {{ border-bottom: 3px solid {primary_color} !important; color: {primary_color} !important; }}
             
-            /* === LUXURY HTML TABLE STYLING === */
             .premium-table-container {{ width: 100%; overflow-x: auto; border-radius: 12px; border: 1px solid #E2D7C8; box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04); background: #FFFFFF; margin-bottom: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; font-family: 'Outfit', sans-serif !important; margin-bottom: 0 !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px 14px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.70rem !important; white-space: nowrap !important; }}
             .premium-table-container td {{ text-align: center !important; padding: 10px 14px !important; border-bottom: 1px solid #F0EAD6 !important; color: #3A2A26 !important; font-size: 0.80rem !important; white-space: nowrap !important; }}
             .premium-table-container td:first-child {{ font-weight: 700 !important; text-align: center !important; }}
             
-            /* Hide sidebar toggle if onboarding */
             {'''[data-testid="collapsedControl"] { display: none; }''' if st.session_state.app_state == "onboarding" else ""}
         </style>
     """, unsafe_allow_html=True)
 
 apply_custom_theme(st.session_state.brand_color)
 
-# Soft Colormaps
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 custom_tan_reversed = mcolors.LinearSegmentedColormap.from_list("custom_tan_r", ["#B3845C", "#E2D7C8", "#F9F7F3"])
 
@@ -88,17 +82,38 @@ def get_bq_client():
 
 @st.cache_data(ttl=600)
 def load_visitor_base():
+    """ 
+    CRITICAL FIX: Queries the RAW pixel table so standard text perfectly matches 
+    the text inside the CSV Order join.
+    """
     client = get_bq_client()
-    df = client.query("SELECT gender, age, income, region, net_worth, children, marital_status, homeowner, credit_rating, total_visitors FROM `xenon-mantis-430216-n4.final_dashboard.demographic_leaderboard`").to_dataframe()
+    query = """
+        SELECT 
+            GENDER as gender, AGE_RANGE as age, INCOME_RANGE as income, 
+            CASE 
+                WHEN PERSONAL_STATE IN ('CT', 'ME', 'MA', 'NH', 'RI', 'VT', 'NJ', 'NY', 'PA') THEN 'Northeast'
+                WHEN PERSONAL_STATE IN ('IL', 'IN', 'IA', 'KS', 'MI', 'MN', 'MO', 'NE', 'ND', 'OH', 'SD', 'WI') THEN 'Midwest'
+                WHEN PERSONAL_STATE IN ('AL', 'AR', 'DE', 'FL', 'GA', 'KY', 'LA', 'MD', 'MS', 'NC', 'OK', 'SC', 'TN', 'TX', 'VA', 'WV', 'DC') THEN 'South'
+                WHEN PERSONAL_STATE IN ('AK', 'AZ', 'CA', 'CO', 'HI', 'ID', 'MT', 'NV', 'NM', 'OR', 'UT', 'WA', 'WY') THEN 'West'
+                ELSE 'Unknown'
+            END as region,
+            NET_WORTH as net_worth, CHILDREN as children, MARRIED as marital_status, 
+            HOMEOWNER as homeowner, SKIPTRACE_CREDIT_RATING as credit_rating,
+            COUNT(*) as total_visitors
+        FROM `xenon-mantis-430216-n4.visitors_raw.all_visitors_combined`
+        GROUP BY 1,2,3,4,5,6,7,8,9
+    """
+    df = client.query(query).to_dataframe()
+    
     demo_cols = ["gender", "age", "income", "region", "net_worth", "children", "marital_status", "homeowner", "credit_rating"]
     for col in demo_cols:
         if col in df.columns:
-            df[col] = df[col].astype(str).str.replace(' to ', '-', regex=False).str.strip()
-    return df.fillna("Unknown").replace("", "Unknown")
+            df[col] = df[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown').str.strip()
+    
+    df['total_visitors'] = pd.to_numeric(df['total_visitors'], errors='coerce').fillna(0)
+    return df
 
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
-INCOME_MAP = {'$0-$59,999': 1, '$60,000-$99,999': 2, '$100,000-$199,999': 3, '$200,000+': 4}
-NET_WORTH_MAP = {'$49,999 and below': 1, '$50,000-$99,999': 2, '$100,000-$249,999': 3, '$250,000-$499,999': 4, '$500,000-$999,999': 5, '$1,000,000+': 6}
 
 # ================ 3. STATE 1: ONBOARDING SCREEN =================
 if st.session_state.app_state == "onboarding":
@@ -110,7 +125,6 @@ if st.session_state.app_state == "onboarding":
         st.markdown("### 1. Brand Your App (Optional)")
         website_url = st.text_input("🔗 What is your website URL?", placeholder="https://www.yourstore.com")
         
-        # Only scrape if the URL has actually changed
         if website_url and website_url != st.session_state.scraped_url:
             st.session_state.scraped_url = website_url
             if not website_url.startswith('http'): website_url = 'https://' + website_url
@@ -122,11 +136,10 @@ if st.session_state.app_state == "onboarding":
                     color_meta = soup.find('meta', attrs={'name': 'theme-color'})
                     if color_meta and color_meta.get('content'):
                         st.session_state.brand_color = color_meta['content']
-                    st.rerun() # Safe to rerun now because scraped_url prevents infinite loop
+                    st.rerun() 
                 except Exception:
-                    pass # Fail silently
+                    pass 
         
-        # Display the extracted color securely
         if website_url == st.session_state.scraped_url and st.session_state.brand_color != "#B3845C":
              st.success(f"🎨 Brand color extracted: **{st.session_state.brand_color}**")
         
@@ -185,8 +198,7 @@ if st.session_state.app_state == "onboarding":
                         demo_cols = [c[1] for c in configs]
                         for col in demo_cols:
                             if col in df_joined.columns:
-                                df_joined[col] = df_joined[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown')
-                                df_joined[col] = df_joined[col].str.replace(' to ', '-', regex=False).str.strip()
+                                df_joined[col] = df_joined[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown').str.strip()
                         
                         st.session_state.df_icp = df_joined
                         st.session_state.df_visitors = load_visitor_base()
@@ -216,7 +228,7 @@ elif st.session_state.app_state == "dashboard":
         st.markdown("<br><br>", unsafe_allow_html=True)
         if st.button("🔄 Upload New Orders", use_container_width=True): 
             st.session_state.app_state = "onboarding"
-            st.session_state.scraped_url = "" # Reset memory
+            st.session_state.scraped_url = "" 
             st.rerun()
 
     metric_map = {"Conv %": "Conv %", "Purchases": "Purchases", "Revenue": "Revenue", "Visitors": "Visitors", "Rev/Visitor": "Rev/Visitor"}
@@ -237,10 +249,10 @@ elif st.session_state.app_state == "dashboard":
                 
         selected_col = dict(configs)[st.session_state.active_single_var]
         
-        df_v = st.session_state.df_visitors[~st.session_state.df_visitors[selected_col].isin(['Unknown', 'U', ''])]
+        df_v = st.session_state.df_visitors[~st.session_state.df_visitors[selected_col].isin(EXCLUDE_LIST)]
         df_v_grp = df_v.groupby(selected_col)['total_visitors'].sum().reset_index().rename(columns={'total_visitors': 'Visitors'})
         
-        df_p = st.session_state.df_icp[~st.session_state.df_icp[selected_col].isin(['Unknown', 'U', ''])]
+        df_p = st.session_state.df_icp[~st.session_state.df_icp[selected_col].isin(EXCLUDE_LIST)]
         df_p_grp = df_p.groupby(selected_col).agg(Purchases=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
         
         df_merged = pd.merge(df_v_grp, df_p_grp, on=selected_col, how='left').fillna(0)
@@ -259,10 +271,10 @@ elif st.session_state.app_state == "dashboard":
         st.subheader("🏆 Top Conversion Drivers")
         predictive_data = []
         for label, col_name in configs:
-            df_v_sub = st.session_state.df_visitors[~st.session_state.df_visitors[col_name].isin(['Unknown', 'U', ''])]
+            df_v_sub = st.session_state.df_visitors[~st.session_state.df_visitors[col_name].isin(EXCLUDE_LIST)]
             grp_v = df_v_sub.groupby(col_name)['total_visitors'].sum().reset_index()
             
-            df_p_sub = st.session_state.df_icp[~st.session_state.df_icp[col_name].isin(['Unknown', 'U', ''])]
+            df_p_sub = st.session_state.df_icp[~st.session_state.df_icp[col_name].isin(EXCLUDE_LIST)]
             grp_p = df_p_sub.groupby(col_name).agg(Purchases=('Order_ID', 'nunique')).reset_index()
             
             grp = pd.merge(grp_v, grp_p, on=col_name, how='left').fillna(0).rename(columns={'total_visitors': 'Visitors'})
@@ -291,12 +303,9 @@ elif st.session_state.app_state == "dashboard":
                     c_title.markdown(f'<p style="font-weight: 600; color: {st.session_state.brand_color}; margin-bottom: 0;">{label}</p>', unsafe_allow_html=True)
                     is_inc = c_inc.checkbox("Inc", key=f"inc_{col_name}", help=f"Include {label}")
                     
-                    opts = [x for x in st.session_state.df_visitors[col_name].unique() if x not in ['Unknown', 'U', '']]
-                    if col_name == 'income': opts = sorted(opts, key=lambda x: INCOME_MAP.get(x, 99))
-                    elif col_name == 'net_worth': opts = sorted(opts, key=lambda x: NET_WORTH_MAP.get(x, 99))
-                    else: opts = sorted(opts)
-
-                    val = st.multiselect(f"Filter {label}", opts, key=f"f_{col_name}", label_visibility="collapsed", placeholder="All")
+                    # Safe sorting fallback
+                    opts = [x for x in st.session_state.df_visitors[col_name].unique() if x not in EXCLUDE_LIST]
+                    val = st.multiselect(f"Filter {label}", sorted(opts), key=f"f_{col_name}", label_visibility="collapsed", placeholder="All")
                     if is_inc: included_types.append(col_name)
                     if val: selected_filters[col_name] = val
 
@@ -332,8 +341,8 @@ elif st.session_state.app_state == "dashboard":
                     temp_v, temp_p = dff_v.copy(), dff_p.copy()
                     
                     for col in sub_cols:
-                        temp_v = temp_v[~temp_v[col].isin(['Unknown', 'U', ''])]
-                        temp_p = temp_p[~temp_p[col].isin(['Unknown', 'U', ''])]
+                        temp_v = temp_v[~temp_v[col].isin(EXCLUDE_LIST)]
+                        temp_p = temp_p[~temp_p[col].isin(EXCLUDE_LIST)]
                         
                     if temp_v.empty: continue
                         
@@ -380,7 +389,7 @@ elif st.session_state.app_state == "dashboard":
         dash_col1, dash_col2 = st.columns(2)
         for index, (label, col_name) in enumerate(configs):
             grp = df_joined.groupby(col_name).agg(Buyers=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
-            grp = grp[grp[col_name] != "Unknown"]
+            grp = grp[~grp[col_name].isin(EXCLUDE_LIST)]
             
             if not grp.empty:
                 grp['% of Buyers'] = (grp['Buyers'] / grp['Buyers'].sum()) * 100
