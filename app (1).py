@@ -80,6 +80,26 @@ def get_bq_client():
     if "private_key" in creds_dict: creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
     return bigquery.Client(credentials=service_account.Credentials.from_service_account_info(creds_dict), project=creds_dict["project_id"])
 
+def bucket_income(val):
+    val_str = str(val).lower()
+    if val in EXCLUDE_LIST or val_str in ['unknown', 'u', 'none', 'nan']: return 'Unknown'
+    if any(x in val_str for x in ['less than', 'under', '$20,000 to $44', '$45,000 to $59']): return '$0-$59,999'
+    if any(x in val_str for x in ['$60,000 to $74', '$75,000 to $99']): return '$60,000-$99,999'
+    if any(x in val_str for x in ['$100,000 to $149', '$150,000 to $199']): return '$100,000-$199,999'
+    if any(x in val_str for x in ['$200,000', '$250,000']): return '$200,000+'
+    return val
+
+def bucket_net_worth(val):
+    val_str = str(val).lower()
+    if val in EXCLUDE_LIST or val_str in ['unknown', 'u', 'none', 'nan']: return 'Unknown'
+    if any(x in val_str for x in ['-$', 'less than', '$2,500 to $24', '$25,000 to $49', 'under']): return '$49,999 and below'
+    if any(x in val_str for x in ['$50,000 to $74', '$75,000 to $99']): return '$50,000-$99,999'
+    if any(x in val_str for x in ['$100,000 to $149', '$150,000 to $249']): return '$100,000-$249,999'
+    if any(x in val_str for x in ['$250,000 to $374', '$375,000 to $499']): return '$250,000-$499,999'
+    if any(x in val_str for x in ['$500,000 to $74', '$750,000 to $999']): return '$500,000-$999,999'
+    if '1,000,000' in val_str or 'million' in val_str: return '$1,000,000+'
+    return val
+
 def clean_demographics(df):
     """Universal mapper to safely ensure pixel data matches your custom Phase 1 groupings"""
     demo_cols = ["gender", "age", "income", "region", "net_worth", "children", "marital_status", "homeowner", "credit_rating"]
@@ -103,8 +123,9 @@ def clean_demographics(df):
     if 'homeowner' in df.columns:
         df['homeowner'] = df['homeowner'].replace({'True': 'Homeowner', 'False': 'Renter'})
     
-    if 'income' in df.columns: df['income'] = df['income'].str.replace(' to ', '-', regex=False).str.strip()
-    if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].str.replace(' to ', '-', regex=False).str.strip()
+    # Apply Bucket Math
+    if 'income' in df.columns: df['income'] = df['income'].apply(bucket_income)
+    if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].apply(bucket_net_worth)
     
     return df
 
@@ -200,6 +221,7 @@ if st.session_state.app_state == "onboarding":
                         job = client.load_table_from_dataframe(df_orders, temp_table_id, job_config=job_config)
                         job.result()
                         
+                        # CRITICAL FIX: INNER JOIN guarantees we ONLY capture attributed orders
                         query = f"""
                             SELECT 
                                 o.Email, o.`Order ID` as Order_ID, o.Total,
@@ -214,7 +236,7 @@ if st.session_state.app_state == "onboarding":
                                 p.NET_WORTH as net_worth, p.CHILDREN as children, p.MARRIED as marital_status, 
                                 p.HOMEOWNER as homeowner, p.SKIPTRACE_CREDIT_RATING as credit_rating
                             FROM `{temp_table_id}` o
-                            LEFT JOIN `xenon-mantis-430216-n4.visitors_raw.all_visitors_combined` p
+                            INNER JOIN `xenon-mantis-430216-n4.visitors_raw.all_visitors_combined` p
                             ON LOWER(p.PERSONAL_EMAILS) LIKE CONCAT('%', LOWER(o.Email), '%') 
                                OR LOWER(p.BUSINESS_EMAIL) = LOWER(o.Email)
                         """
@@ -343,6 +365,11 @@ elif st.session_state.app_state == "dashboard":
         for col, vals in selected_filters.items(): 
             dff_v = dff_v[dff_v[col].isin(vals)]
             dff_p = dff_p[dff_p[col].isin(vals)]
+
+        # CRITICAL FIX: Ensure KPI Cards only count population with KNOWN traits for active filters
+        for col in included_types:
+            dff_v = dff_v[~dff_v[col].isin(EXCLUDE_LIST)]
+            dff_p = dff_p[~dff_p[col].isin(EXCLUDE_LIST)]
 
         st.markdown("<br>", unsafe_allow_html=True)
         if not dff_v.empty and (selected_filters or included_types):
