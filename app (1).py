@@ -163,7 +163,15 @@ if uploaded_file is not None:
                 """
                 
                 df_joined = client.query(query).to_dataframe()
-                df_joined = df_joined.fillna("Unknown").replace("", "Unknown")
+                
+                # Convert only the demographic traits to text so "Unknown" doesn't break strict True/False columns
+                demo_cols = ["gender", "age", "income", "region", "net_worth", "children", "marital_status", "homeowner", "credit_rating"]
+                for col in demo_cols:
+                    if col in df_joined.columns:
+                        df_joined[col] = df_joined[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown')
+                        
+                # Ensure Total stays a number for the math
+                df_joined['Total'] = pd.to_numeric(df_joined['Total'], errors='coerce').fillna(0)
             
             # 4. Build the Dashboard
             st.markdown("<hr style='margin-top: 3rem; margin-bottom: 3rem;'>", unsafe_allow_html=True)
