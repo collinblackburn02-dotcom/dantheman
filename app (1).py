@@ -73,18 +73,40 @@ def render_premium_table(styler_obj):
     html = styler_obj.to_html()
     st.markdown(f'<div class="premium-table-container">{html}</div>', unsafe_allow_html=True)
 
-# ================ 2. BigQuery Connection =================
+# ================ 2. BigQuery & Core Data Engine =================
 @st.cache_resource
 def get_bq_client():
     creds_dict = dict(st.secrets["gcp_service_account"])
     if "private_key" in creds_dict: creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
     return bigquery.Client(credentials=service_account.Credentials.from_service_account_info(creds_dict), project=creds_dict["project_id"])
 
+def clean_demographics(df):
+    """Universal mapper to ensure pixel data perfectly matches your custom Phase 1 groupings"""
+    df = df.fillna("Unknown").replace(["", "nan", "NaN", "None", "null", "NULL"], "Unknown")
+    
+    if 'credit_rating' in df.columns:
+        df['credit_rating'] = df['credit_rating'].replace({
+            'A': 'High (A, B, C)', 'B': 'High (A, B, C)', 'C': 'High (A, B, C)',
+            'D': 'Medium (D, E)', 'E': 'Medium (D, E)',
+            'F': 'Low (F, G)', 'G': 'Low (F, G)'
+        })
+    if 'children' in df.columns:
+        df['children'] = df['children'].replace({'True': 'Y', 'False': 'N', True: 'Y', False: 'N'})
+    if 'marital_status' in df.columns:
+        df['marital_status'] = df['marital_status'].replace({'True': 'Married', 'False': 'Single', True: 'Married', False: 'Single'})
+    if 'homeowner' in df.columns:
+        df['homeowner'] = df['homeowner'].replace({'True': 'Homeowner', 'False': 'Renter', True: 'Homeowner', False: 'Renter'})
+    
+    if 'income' in df.columns: df['income'] = df['income'].str.replace(' to ', '-', regex=False).str.strip()
+    if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].str.replace(' to ', '-', regex=False).str.strip()
+    
+    return df
+
 @st.cache_data(ttl=600)
 def load_visitor_base():
     """ 
-    CRITICAL FIX: Queries the RAW pixel table so standard text perfectly matches 
-    the text inside the CSV Order join.
+    CRITICAL FIX: Queries the RAW pixel table directly, counting UNIQUE UUIDs 
+    to lock the visitor denominator to the true 56k count. NO LEADERBOARD USED.
     """
     client = get_bq_client()
     query = """
@@ -99,21 +121,19 @@ def load_visitor_base():
             END as region,
             NET_WORTH as net_worth, CHILDREN as children, MARRIED as marital_status, 
             HOMEOWNER as homeowner, SKIPTRACE_CREDIT_RATING as credit_rating,
-            COUNT(*) as total_visitors
+            COUNT(DISTINCT UUID) as total_visitors
         FROM `xenon-mantis-430216-n4.visitors_raw.all_visitors_combined`
         GROUP BY 1,2,3,4,5,6,7,8,9
     """
     df = client.query(query).to_dataframe()
-    
-    demo_cols = ["gender", "age", "income", "region", "net_worth", "children", "marital_status", "homeowner", "credit_rating"]
-    for col in demo_cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown').str.strip()
-    
+    df = clean_demographics(df)
     df['total_visitors'] = pd.to_numeric(df['total_visitors'], errors='coerce').fillna(0)
     return df
 
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
+INCOME_MAP = {'$0-$59,999': 1, '$60,000-$99,999': 2, '$100,000-$199,999': 3, '$200,000+': 4}
+NET_WORTH_MAP = {'$49,999 and below': 1, '$50,000-$99,999': 2, '$100,000-$249,999': 3, '$250,000-$499,999': 4, '$500,000-$999,999': 5, '$1,000,000+': 6}
+CREDIT_MAP = {'High (A, B, C)': 1, 'Medium (D, E)': 2, 'Low (F, G)': 3}
 
 # ================ 3. STATE 1: ONBOARDING SCREEN =================
 if st.session_state.app_state == "onboarding":
@@ -161,7 +181,7 @@ if st.session_state.app_state == "onboarding":
             if missing_cols:
                 st.error(f"⚠️ Your CSV is missing: **{', '.join(missing_cols)}**")
             else:
-                with st.spinner("Pushing orders to BigQuery and matching pixels..."):
+                with st.spinner("Pushing orders to BigQuery and mapping raw demographics..."):
                     try:
                         df_orders['Total'] = df_orders['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True)
                         df_orders['Total'] = pd.to_numeric(df_orders['Total'], errors='coerce').fillna(0)
@@ -195,10 +215,8 @@ if st.session_state.app_state == "onboarding":
                         df_joined = client.query(query).to_dataframe()
                         df_joined = df_joined.drop_duplicates(subset=['Order_ID'], keep='first')
                         
-                        demo_cols = [c[1] for c in configs]
-                        for col in demo_cols:
-                            if col in df_joined.columns:
-                                df_joined[col] = df_joined[col].astype(str).replace(['nan', 'None', '<NA>', ''], 'Unknown').str.strip()
+                        # Apply universal mapper to match baseline
+                        df_joined = clean_demographics(df_joined)
                         
                         st.session_state.df_icp = df_joined
                         st.session_state.df_visitors = load_visitor_base()
@@ -303,9 +321,13 @@ elif st.session_state.app_state == "dashboard":
                     c_title.markdown(f'<p style="font-weight: 600; color: {st.session_state.brand_color}; margin-bottom: 0;">{label}</p>', unsafe_allow_html=True)
                     is_inc = c_inc.checkbox("Inc", key=f"inc_{col_name}", help=f"Include {label}")
                     
-                    # Safe sorting fallback
                     opts = [x for x in st.session_state.df_visitors[col_name].unique() if x not in EXCLUDE_LIST]
-                    val = st.multiselect(f"Filter {label}", sorted(opts), key=f"f_{col_name}", label_visibility="collapsed", placeholder="All")
+                    if col_name == 'income': opts = sorted(opts, key=lambda x: INCOME_MAP.get(x, 99))
+                    elif col_name == 'net_worth': opts = sorted(opts, key=lambda x: NET_WORTH_MAP.get(x, 99))
+                    elif col_name == 'credit_rating': opts = sorted(opts, key=lambda x: CREDIT_MAP.get(x, 99))
+                    else: opts = sorted(opts)
+
+                    val = st.multiselect(f"Filter {label}", opts, key=f"f_{col_name}", label_visibility="collapsed", placeholder="All")
                     if is_inc: included_types.append(col_name)
                     if val: selected_filters[col_name] = val
 
@@ -376,7 +398,7 @@ elif st.session_state.app_state == "dashboard":
         st.markdown('<p style="color: #666; margin-top: -5px; margin-bottom: 30px;">Demographic DNA of your actual paying customers.</p>', unsafe_allow_html=True)
         
         df_joined = st.session_state.df_icp
-        total_buyers = df_joined['Email'].nunique()
+        total_buyers = df_joined['Order_ID'].nunique()
         total_rev = df_joined['Total'].sum()
         overall_aov = total_rev / total_buyers if total_buyers > 0 else 0
         
