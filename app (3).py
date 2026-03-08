@@ -1,324 +1,187 @@
-
 import streamlit as st
 import pandas as pd
-import numpy as np
-import duckdb
-import plotly.express as px
-from utils import resolve_col
-from itertools import combinations
+import matplotlib.colors as mcolors
+import os
 
-st.set_page_config(page_title="Heavenly Health — Customer Insights", layout="wide")
-try:
-    st.logo("logo.png")
-except Exception:
-    pass
+# ================ 0. PITCH CONFIGURATION =================
+PITCH_COMPANY_NAME = "LeadNavigator" 
+PITCH_BRAND_COLOR = "#0A2540" 
+# =========================================================
 
-st.title("✨ Heavenly Health — Customer Insights")
-st.caption("Fast, ranked customer segments powered by DuckDB (GROUPING SETS) — using DISTINCT visitors for correct conversion rates.")
+st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="wide", initial_sidebar_state="collapsed")
 
-with st.sidebar:
-    st.image("logo.png", use_column_width=True)
-    st.markdown("### Data Source")
-    gh_url = st.text_input(
-        "GitHub CSV (raw) URL",
-        placeholder="https://raw.githubusercontent.com/<user>/<repo>/<branch>/path/to/file.csv",
-    )
-    st.markdown("**— or —**")
-    uploaded = st.file_uploader("Upload merged CSV", type=["csv"])
+# --- App State Management ---
+if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
+if "df_icp" not in st.session_state: st.session_state.df_icp = None
 
-    st.markdown("---")
-    metric_choice = st.radio("Sort / Map metric", ["Conversion %","Purchases","Visitors","Revenue / Visitor"], index=0)
-    max_depth = st.slider("Max combo depth", 1, 4, 2, 1)
-    top_n = st.slider("Top N", 10, 1000, 50, 10)
+def apply_custom_theme(primary_color):
+    st.markdown(f"""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+            html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
+            .stApp {{ background-color: #F9F7F3; }}
+            h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
+            p, span, label {{ color: #2D2421 !important; }}
+            
+            div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; border-radius: 8px; font-weight: 800; }}
+            div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; border-radius: 8px; }}
+            
+            [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px 24px; box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04); }}
+            [data-testid="stMetricLabel"] {{ color: {primary_color} !important; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.85rem; }}
+            [data-testid="stMetricValue"] {{ color: #2D2421 !important; font-weight: 700; font-size: 2.2rem; }}
+            
+            .premium-table-container {{ width: 100%; overflow-x: auto; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; margin-bottom: 2rem; }}
+            .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; font-family: 'Outfit', sans-serif !important; }}
+            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px 14px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.70rem !important; }}
+            .premium-table-container td {{ text-align: center !important; padding: 10px 14px !important; border-bottom: 1px solid #F0EAD6 !important; font-size: 0.85rem !important; }}
+            .premium-table-container td:first-child {{ font-weight: 700 !important; }}
+        </style>
+    """, unsafe_allow_html=True)
 
-    st.markdown("---")
-    cache_ttl = st.number_input("Cache (minutes) for GitHub file", min_value=0, value=15, step=5)
-    reload_clicked = st.button("🔄 Force Reload")
+apply_custom_theme(PITCH_BRAND_COLOR)
+custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 
-@st.cache_data(show_spinner=False)
-def _load_df_from_github(url: str) -> pd.DataFrame:
-    df = pd.read_csv(url)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+def render_premium_table(styler_obj):
+    try: styler_obj = styler_obj.hide(axis="index")
+    except AttributeError: styler_obj = styler_obj.hide_index() 
+    html = styler_obj.to_html()
+    st.markdown(f'<div class="premium-table-container">{html}</div>', unsafe_allow_html=True)
 
-@st.cache_data(show_spinner=False)
-def _load_df_from_upload(file) -> pd.DataFrame:
-    df = pd.read_csv(file)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
 
-def load_df(gh_url: str | None, uploaded_file):
-    if gh_url:
-        try:
-            if reload_clicked:
-                _load_df_from_github.clear()
-            if cache_ttl and cache_ttl > 0:
-                minute_bucket = pd.Timestamp.utcnow().floor(f"{int(cache_ttl)}min")
-                return _load_df_from_github(gh_url + f"?t={minute_bucket.isoformat()}")
-            return _load_df_from_github(gh_url)
-        except Exception as e:
-            st.error(f"Failed to load CSV from GitHub URL.\n\n{e}")
-            st.stop()
-    elif uploaded_file:
-        return _load_df_from_upload(uploaded_file)
+# ================ 2. LIVE AWS CONNECTION =================
+@st.cache_data(ttl=3600) # Caches the data for 1 hour so it loads instantly on multiple uploads!
+def load_master_graph():
+    """Reads your live master list directly from AWS S3."""
+    
+    aws_keys = {
+        "key": st.secrets["aws"]["access_key"],
+        "secret": st.secrets["aws"]["secret_key"]
+    }
+    
+    # Exact S3 Path based on your bucket and file name
+    s3_file_path = "s3://leadnav-demo-data/visitors_raw - NEW Copy of Copy of CLEAN  - EnrichedRaw (1).csv"
+    
+    # Read directly from AWS into memory
+    df_master = pd.read_csv(s3_file_path, storage_options=aws_keys, low_memory=False)
+    
+    # Ensure the email column is perfectly standardized for matching
+    # NOTE: If your CSV uses "email_address" or "PERSONAL_EMAILS", rename it here:
+    # df_master = df_master.rename(columns={'PERSONAL_EMAILS': 'Email'})
+    
+    if 'Email' in df_master.columns:
+        df_master['Email'] = df_master['Email'].astype(str).str.lower().str.strip()
+        
+    return df_master
+
+# ================ 3. STATE 1: ONBOARDING SCREEN =================
+if st.session_state.app_state == "onboarding":
+    
+    col_logo1, col_logo2, col_logo3 = st.columns([2, 1, 2])
+    with col_logo2:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", use_container_width=True)
+            
+    st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem; color: {PITCH_BRAND_COLOR} !important; margin-top: 10px;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; font-size: 1.8rem; margin-top: -10px; color: #444;'>Identity Resolution Engine</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; margin-bottom: 3rem; font-size: 1.1rem;'>Upload your raw orders. We will securely match them against our identity graph to reveal your Customer DNA.</p>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("### Process Historical Orders")
+        st.info("📦 **Format Required:** `Date`, `Email`, `Order ID`, `Total` (Shopify exports work automatically!)")
+        uploaded_file = st.file_uploader("Upload Orders CSV", type=["csv"], label_visibility="collapsed")
+
+        if uploaded_file is not None:
+            df_orders = pd.read_csv(uploaded_file)
+            
+            # Shopify Auto-Mapper
+            shopify_map = {'Name': 'Order ID', 'Created at': 'Date'}
+            df_orders = df_orders.rename(columns=shopify_map)
+            
+            required_cols = ["Date", "Email", "Order ID", "Total"]
+            missing_cols = [col for col in required_cols if col not in df_orders.columns]
+            
+            if missing_cols:
+                st.error(f"⚠️ Your CSV is missing: **{', '.join(missing_cols)}**")
+            else:
+                with st.spinner(f"Pulling {PITCH_COMPANY_NAME} Identity Graph from AWS S3..."):
+                    df_master_aws = load_master_graph()
+                    
+                    with st.spinner("Resolving Identities and Calculating Match Rate..."):
+                        df_orders['Total'] = df_orders['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True)
+                        df_orders['Total'] = pd.to_numeric(df_orders['Total'], errors='coerce').fillna(0)
+                        df_orders = df_orders.drop_duplicates(subset=['Order_ID'], keep='first')
+                        
+                        # === THE LEAD MAGNET GATEKEEPER ===
+                        if len(df_orders) > 1000:
+                            st.session_state.truncated = True
+                            df_orders = df_orders.head(1000)
+                        else:
+                            st.session_state.truncated = False
+                        
+                        df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
+                        
+                        # === REAL AWS MATCH LOGIC ===
+                        # Inner join ensures we only keep orders where the email exists in your AWS CSV
+                        df_joined = pd.merge(df_orders, df_master_aws, on='Email', how='inner')
+                        
+                        if df_joined.empty:
+                            st.error("⚠️ Zero matches found. Make sure the 'Email' column in your AWS CSV exactly matches the uploaded orders.")
+                        else:
+                            # Standardize nulls for clean charts
+                            df_joined = df_joined.fillna('Unknown').replace(["", "nan", "NaN", "None", "null", "NULL", "<NA>"], "Unknown")
+                            st.session_state.df_icp = df_joined
+                            st.session_state.app_state = "dashboard"
+                            st.rerun()
+
+# ================ 4. STATE 2: LIVE DASHBOARD =================
+elif st.session_state.app_state == "dashboard":
+    
+    col_head1, col_head2 = st.columns([3, 1])
+    with col_head1:
+        st.markdown(f"<h1 style='color: {PITCH_BRAND_COLOR} !important; margin-bottom: 0px;'>🧬 Customer DNA Match</h1>", unsafe_allow_html=True)
+    with col_head2:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", width=150)
+    
+    # Gatekeeper Alert
+    if st.session_state.get('truncated', False):
+        st.warning(f"⚠️ **Lead Magnet Preview:** Your file exceeded 1,000 rows. We resolved identities for the first 1,000 orders to demonstrate the {PITCH_COMPANY_NAME} Engine. Connect with our team to unlock your full historical database.")
     else:
-        return None
-
-def to_datetime_series(s: pd.Series) -> pd.Series:
-    try:
-        return pd.to_datetime(s, errors="coerce")
-    except Exception:
-        return pd.to_datetime(pd.Series([None] * len(s)))
-
-df = load_df(gh_url.strip() if gh_url else None, uploaded)
-
-if df is None:
-    st.info("Paste a GitHub *raw* CSV URL in the sidebar **or** upload the merged CSV to begin.")
-    st.stop()
-
-# ---- Resolve columns ----
-email_col = resolve_col(df, "EMAIL")
-purchase_col = resolve_col(df, "PURCHASE")
-date_col = resolve_col(df, "DATE")
-msku_col = resolve_col(df, "MOST_RECENT_SKU")
-state_col = resolve_col(df, "PERSONAL_STATE")
-revenue_col = resolve_col(df, "REVENUE")
-
-if email_col is None or purchase_col is None:
-    st.error("Missing EMAIL or PURCHASE column.")
-    st.stop()
-
-# Purchase flag
-s = df[purchase_col]
-if pd.api.types.is_numeric_dtype(s):
-    df["_PURCHASE"] = (s.fillna(0) > 0).astype(int)
-else:
-    vals = s.astype(str).str.strip().str.lower()
-    yes = {"1","true","t","yes","y","buyer","purchased"}
-    df["_PURCHASE"] = vals.isin(yes).astype(int)
-
-df["_DATE"] = to_datetime_series(df[date_col]) if date_col else pd.NaT
-df["_REVENUE"] = pd.to_numeric(df[revenue_col], errors="coerce").fillna(0.0) if revenue_col else 0.0
-
-# Attribute map with friendly labels
-seg_map = {
-    "Age": resolve_col(df, "AGE_RANGE"),
-    "Income": resolve_col(df, "INCOME_RANGE"),
-    "Net worth": resolve_col(df, "NET_WORTH"),
-    "Credit rating": resolve_col(df, "CREDIT_RATING"),
-    "Gender": resolve_col(df, "GENDER"),
-    "Homeowner": resolve_col(df, "HOMEOWNER"),
-    "Married": resolve_col(df, "MARRIED"),
-    "Children": resolve_col(df, "CHILDREN"),
-    "State": state_col,
-}
-seg_map = {k:v for k,v in seg_map.items() if v is not None}
-seg_cols = list(seg_map.values())
-friendly_label = {v:k for k,v in seg_map.items()}
-
-# ---- Filters ----
-with st.expander("🔎 Filters", expanded=True):
-    dff = df.copy()
-
-    for disp, col in seg_map.items():
-        if disp in ("Gender","Credit rating") and col in dff.columns:
-            dff.loc[dff[col].astype(str).str.upper().str.strip()=="U", col] = pd.NA
-
-    if not dff["_DATE"].dropna().empty:
-        mind = pd.to_datetime(dff["_DATE"].dropna().min())
-        maxd = pd.to_datetime(dff["_DATE"].dropna().max())
-        c1,c2 = st.columns(2)
-        with c1:
-            start, end = st.date_input("Date range", (mind.date(), maxd.date()))
-        with c2:
-            include_undated = st.checkbox("Include no-date rows", value=True)
-        if not isinstance(start, tuple):
-            mask = dff["_DATE"].between(pd.to_datetime(start), pd.to_datetime(end))
-            if include_undated:
-                mask |= dff["_DATE"].isna()
-            dff = dff[mask]
-
-    sku_search = st.text_input("Most Recent SKU contains (optional)")
-    if msku_col and sku_search:
-        dff = dff[dff[msku_col].astype(str).str.contains(sku_search, case=False, na=False)]
-
-    selections = {}
-    include_flags = {}
-    if seg_cols:
-        st.markdown("**Attributes**")
-        cols = st.columns(3)
-        idx = 0
-        for display, col in seg_map.items():
-            with cols[idx % 3]:
-                mode = st.selectbox(f"{display}: mode", options=["Include","Do not include"], index=0, key=f"mode_{display}")
-                include_flags[col] = (mode=="Include")
-                values = sorted([x for x in dff[col].dropna().unique().tolist() if str(x).strip()])
-                sel = st.multiselect(display, options=values, default=[], help="Empty = All")
-                if sel:
-                    selections[col] = sel
-            idx += 1
-        for col, vals in selections.items():
-            dff = dff[dff[col].isin(vals)]
-
-    st.caption(f"Rows after filters: **{len(dff):,}** / {len(df):,}")
-
-include_cols = [c for c in seg_cols if include_flags.get(c, True)]
-required_cols = [col for col, vals in selections.items() if len(vals)>0 and include_flags.get(col, True)]
-
-# ---- DuckDB compute using DISTINCT email for visitors/purchases ----
-con = duckdb.connect()
-con.register("t", dff)
-
-attrs = [c for c in include_cols if c in dff.columns]
-
-from itertools import combinations
-req_set = set(required_cols)
-sets = []
-for d in range(1, max_depth+1):
-    for sset in combinations(attrs, d):
-        if req_set.issubset(set(sset)):
-            sets.append("(" + ",".join([f'"{c}"' for c in sset]) + ")")
-if not sets:
-    if required_cols:
-        sets.append("(" + ",".join([f'"{c}"' for c in required_cols]) + ")")
-    else:
-        sets.append("(" + ",".join([f'"{c}"' for c in attrs[:1]]) + ")") if attrs else sets.append("()")
-grouping_sets_sql = ",\n".join(sets)
-
-# Top SKUs by distinct buyers overall
-sku_sums = ""
-sku_cols_order = []
-if msku_col and msku_col in dff.columns:
-    top_skus = con.execute(f"""
-        SELECT "{msku_col}" AS sku,
-               COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS buyers
-        FROM t
-        WHERE "{msku_col}" IS NOT NULL AND TRIM("{msku_col}")<>''
-        GROUP BY 1
-        ORDER BY buyers DESC
-        LIMIT 11
-    """).fetchdf()["sku"].astype(str).tolist()
-    if top_skus:
-        sku_cols_order = top_skus
-        pieces = []
-        for sku in top_skus:
-            s_escaped = sku.replace("'", "''")
-            pieces.append(
-                f'COUNT(DISTINCT CASE WHEN "{msku_col}"=\'{s_escaped}\' AND _PURCHASE=1 THEN "{email_col}" END) AS "{sku}"'
-            )
-        sku_sums = ",\n  " + ",\n  ".join(pieces)
-
-depth_expr = " + ".join([f'CASE WHEN "{c}" IS NULL THEN 0 ELSE 1 END' for c in attrs]) if attrs else "0"
-
-revenue_sql = (
-    f'SUM(_REVENUE) AS revenue,\n  1.0 * SUM(_REVENUE) / NULLIF(COUNT(DISTINCT "{email_col}"),0) AS rpv'
-    if revenue_col else "0.0 AS revenue, 0.0 AS rpv"
-)
-
-
-# Build SELECT list safely (avoid a leading comma when no attribute columns)
-select_parts = []
-if attrs:
-    select_parts.extend([f'"{c}"' for c in attrs])
-select_parts.append(f'COUNT(DISTINCT "{email_col}") AS Visitors')
-select_parts.append(f'COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END) AS Purchases')
-select_parts.append('100.0 * COUNT(DISTINCT CASE WHEN _PURCHASE=1 THEN "{email_col}" END)
-        / NULLIF(COUNT(DISTINCT "{email_col}"),0) AS conv_rate')
-select_parts.append(f'({depth_expr}) AS Depth')
-select_parts.append(revenue_sql.replace("\n", "
-").replace("  ", " "))
-if sku_sums:
-    # sku_sums is like ",
-  COUNT... AS \"SKU\""; we need to strip the initial comma and prepend properly
-    select_parts.append(sku_sums.lstrip(",\n ").replace("\n  ", "\n"))
-
-select_clause = ",
-  ".join(select_parts)
-
-sql = f"""
-SELECT
-  {select_clause}
-FROM t
-{'GROUP BY GROUPING SETS (' + grouping_sets_sql + ')' if attrs else ''}
-HAVING COUNT(DISTINCT "{email_col}") >= ?
-"""
-
-st.subheader("🏆 Ranked Conversion Table")
-min_rows = st.number_input("Minimum Visitors per group", min_value=1, value=30, step=1)
-res = con.execute(sql, [int(min_rows)]).fetchdf()
-
-# --- Sort and arrange columns ---
-sort_key_map = {"Conversion %": "conv_rate","Purchases":"Purchases","Visitors":"Visitors","Revenue / Visitor":"rpv"}
-res = res.sort_values(sort_key_map[metric_choice], ascending=False).head(top_n).reset_index(drop=True)
-
-# Build display dataframe
-rename_map = {c: friendly_label.get(c, c) for c in attrs}
-rename_map.update({"conv_rate":"Conversion %","rpv":"Revenue / Visitor","revenue":"Revenue"})
-disp = res.rename(columns=rename_map).copy()
-disp.insert(0, "Rank", np.arange(1, len(disp)+1))
-
-# Numeric formatting
-def fmt_int(v):
-    if pd.isna(v):
-        return ""
-    try:
-        return f"{int(round(float(v))):,}"
-    except Exception:
-        return str(v)
-
-for col in ["Visitors","Purchases","Depth"]:
-    if col in disp.columns:
-        disp[col] = disp[col].map(fmt_int)
-
-if "Conversion %" in disp.columns:
-    disp["Conversion %"] = res["conv_rate"].map(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
-if "Revenue / Visitor" in disp.columns:
-    disp["Revenue / Visitor"] = res["rpv"].map(lambda x: f"${x:,.2f}" if pd.notnull(x) else "")
-
-# Attribute values cleaned
-for c in rename_map.values():
-    if c in disp.columns:
-        disp[c] = disp[c].fillna("").replace("None","")
-
-# Identify SKU columns (already labeled with raw SKU codes)
-sku_cols = [c for c in sku_cols_order if c in res.columns]
-# Format SKUs: blank when zero
-for sc in sku_cols:
-    disp[sc] = res[sc].map(lambda x: "" if pd.isna(x) or int(round(float(x)))==0 else fmt_int(x))
-
-# Order: core, attributes, then SKUs to the far right
-attribute_display_cols = [rename_map[c] for c in attrs]
-table_cols = ["Rank","Visitors","Purchases","Conversion %","Depth"] + attribute_display_cols + sku_cols
-
-def highlight_conv(s):
-    return ["font-weight: bold" if s.name=="Conversion %" else "" for _ in s]
-
-styled = disp[table_cols].style.apply(highlight_conv, axis=0)
-st.dataframe(styled, use_container_width=True, hide_index=True)
-
-# Download CSV with clean headers (SKUs to the right)
-csv_out = res.copy()
-csv_out.insert(0, "Rank", np.arange(1, len(csv_out)+1))
-csv_cols = ["Rank","Visitors","Purchases","conv_rate","Depth","rpv","revenue"] + attrs + sku_cols
-csv_out = csv_out[csv_cols].rename(columns={"conv_rate":"Conversion % (0-100)","rpv":"Revenue / Visitor","revenue":"Revenue", **{c: rename_map[c] for c in attrs}})
-st.download_button("Download ranked combinations (CSV)", data=csv_out.to_csv(index=False).encode("utf-8"),
-                   file_name="ranked_combinations.csv", mime="text/csv")
-
-# ---- Map by State (distinct) ----
-if state_col and state_col in dff.columns:
-    st.subheader("🗺️ State Map")
-    metric_for_map = sort_key_map[metric_choice]
-    map_df = dff.copy()
-    map_df[state_col] = map_df[state_col].astype(str).str.upper().str.strip()
-    visitors = map_df.groupby(state_col)[email_col].nunique().rename("Visitors")
-    buyers = map_df[map_df["_PURCHASE"]==1].groupby(state_col)[email_col].nunique().rename("Purchases")
-    revenue = map_df.groupby(state_col)["_REVENUE"].sum().rename("Revenue")
-    agg = pd.concat([visitors, buyers, revenue], axis=1).reset_index().fillna(0)
-    agg["conv_rate"] = 100.0 * agg["Purchases"] / agg["Visitors"].replace(0, np.nan)
-    agg["rpv"] = agg["Revenue"] / agg["Visitors"].replace(0, np.nan)
-    fig = px.choropleth(agg, locations=state_col, locationmode="USA-states",
-                        color=metric_for_map, scope="usa",
-                        color_continuous_scale="YlOrBr",
-                        labels={"conv_rate":"Conversion %","rpv":"Revenue / Visitor"})
-    fig.update_layout(margin={"l":0,"r":0,"t":0,"b":0})
-    st.plotly_chart(fig, use_container_width=True)
+        st.markdown(f"<p style='color: #666; font-size: 1.1rem; margin-top: -5px; margin-bottom: 30px;'>Successfully resolved identities via the {PITCH_COMPANY_NAME} Graph.</p>", unsafe_allow_html=True)
+    
+    if st.button("← Upload New File", type="secondary"):
+        st.session_state.app_state = "onboarding"
+        st.rerun()
+        
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    df_joined = st.session_state.df_icp
+    total_buyers = df_joined['Order_ID'].nunique()
+    total_rev = df_joined['Total'].sum()
+    overall_aov = total_rev / total_buyers if total_buyers > 0 else 0
+    
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Resolved Buyers", f"{total_buyers:,.0f}")
+    m2.metric("Total Attributed Revenue", f"${total_rev:,.2f}")
+    m3.metric("Overall Average Order Value", f"${overall_aov:,.2f}")
+    st.markdown("<br><hr><br>", unsafe_allow_html=True)
+    
+    dash_col1, dash_col2 = st.columns(2)
+    for index, (label, col_name) in enumerate(configs):
+        if col_name in df_joined.columns:
+            grp = df_joined[df_joined[col_name] != 'Unknown'].groupby(col_name).agg(Buyers=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+            
+            if not grp.empty:
+                grp['% of Buyers'] = (grp['Buyers'] / grp['Buyers'].sum()) * 100
+                grp['% of Revenue'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
+                grp['AOV'] = grp['Revenue'] / grp['Buyers']
+                grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_name: label})
+                
+                format_dict = {'Buyers': '{:,.0f}', '% of Buyers': '{:.1f}%', 'Revenue': '${:,.2f}', '% of Revenue': '{:.1f}%', 'AOV': '${:,.2f}'}
+                styler = grp.style.format(format_dict).background_gradient(subset=['% of Revenue', '% of Buyers'], cmap=custom_light_green)
+                
+                with dash_col1 if index % 2 == 0 else dash_col2:
+                    st.subheader(f"{label} Identity Distribution")
+                    render_premium_table(styler)
