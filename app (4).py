@@ -65,11 +65,9 @@ def load_master_graph():
             e_col = 'PERSONAL_EMAILS' if 'PERSONAL_EMAILS' in temp_df.columns else temp_df.columns[0]
             temp_df = temp_df.rename(columns={e_col: 'email_match'})
             dataframes.append(temp_df)
-            
         df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
         df = df.rename(columns=AWS_COLUMN_MAPPER)
         df.columns = [c.lower() for c in df.columns]
-        
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
@@ -77,19 +75,18 @@ def load_master_graph():
             df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
             df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
             df['zip_code'] = df['zip_code'].str.zfill(5)
-        
         df['email_match'] = df['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email_match').reset_index(drop=True)
         return df.drop_duplicates(subset=['email_match']).reset_index(drop=True)
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
 
-# ================ 3. APP STATE =================
+# ================ 3. INITIALIZATION =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "is_unlocked" not in st.session_state: st.session_state.is_unlocked = False
 if "prompt_pwd" not in st.session_state: st.session_state.prompt_pwd = False
 
-# ================ 4. ONBOARDING =================
+# ================ 4. APP FLOW =================
 if st.session_state.app_state == "onboarding":
     st.markdown("<h1 style='text-align: center; font-size: 3rem; margin-top: 50px;'>🎯 Audience Engine</h1>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 2, 1])
@@ -107,37 +104,39 @@ if st.session_state.app_state == "onboarding":
                     st.session_state.app_state = "dashboard"
                     st.rerun()
 
-# ================ 5. DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
+    # 🚨 STABLE LOCK LOGIC (State-based, non-nested)
+    ctrl_col1, ctrl_col2, _ = st.columns([1, 1, 4])
     
-    # 🚨 FIXED LOCK LOGIC (NO ST.DIALOG)
-    c1, c2, _ = st.columns([1, 1, 4])
     if not st.session_state.is_unlocked:
-        if c1.button("🔑 Unlock Full Profile", kind="primary"): 
-            st.session_state.prompt_pwd = not st.session_state.prompt_pwd
-            
-        if st.session_state.prompt_pwd:
-            with st.container(border=True):
-                pwd = st.text_input("Enter Dashboard Password", type="password")
-                if st.button("Submit Password"):
-                    if pwd == DEMO_PASSWORD:
-                        st.session_state.is_unlocked = True
-                        st.session_state.prompt_pwd = False
-                        st.rerun()
-                    else: st.error("Wrong password.")
+        if ctrl_col1.button("🔑 Unlock Full Profile", kind="primary"): 
+            st.session_state.prompt_pwd = True
     else:
         st.success("✅ Full Profile Unlocked")
         
-    if c2.button("🔄 New Analysis"): 
+    if ctrl_col2.button("🔄 New Analysis"): 
         st.session_state.app_state = "onboarding"
         st.session_state.is_unlocked = False
+        st.session_state.prompt_pwd = False
         st.rerun()
 
+    if st.session_state.prompt_pwd and not st.session_state.is_unlocked:
+        with st.container(border=True):
+            pwd_entry = st.text_input("Enter Dashboard Password", type="password")
+            if st.button("Submit Password"):
+                if pwd_entry == DEMO_PASSWORD:
+                    st.session_state.is_unlocked = True
+                    st.session_state.prompt_pwd = False
+                    st.rerun()
+                else:
+                    st.error("Incorrect Password")
+
+    # --- Data Processing ---
     full_df = st.session_state.df_icp
     df_p = full_df if st.session_state.is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # KPIs, Summary, and Table logic follows...
+    # --- UI Components ---
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
@@ -158,6 +157,7 @@ elif st.session_state.app_state == "dashboard":
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
+    
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
     if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
     
@@ -169,10 +169,10 @@ elif st.session_state.app_state == "dashboard":
 
     if st.session_state.active_var == "Location":
         st.markdown("<br>", unsafe_allow_html=True)
-        l_col1, l_col2, l_col3, _ = st.columns([1, 1, 1, 5])
-        if l_col1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
-        if l_col2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
-        if l_col3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
+        l1, l2, l3, _ = st.columns([1, 1, 1, 5])
+        if l1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
+        if l2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
+        if l3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
         loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
         active_col = loc_map[st.session_state.active_loc_level]
     else: active_col = dict(configs)[st.session_state.active_var]
@@ -183,8 +183,18 @@ elif st.session_state.app_state == "dashboard":
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
-            display_df = df_p_grp.rename(columns={active_col: st.session_state.active_var.upper() if st.session_state.active_var != "Location" else st.session_state.active_loc_level.upper()}).sort_values('Revenue', ascending=False)
+            disp_label = st.session_state.active_var.upper() if st.session_state.active_var != "Location" else st.session_state.active_loc_level.upper()
+            display_df = df_p_grp.rename(columns={active_col: disp_label}).sort_values('Revenue', ascending=False)
             
-            # Premium Table Formatting
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
             st.markdown(f'<div class="premium-table-container">{styler.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
+
+            if st.session_state.active_var == "Location":
+                with st.expander(f"🗺️ View {st.session_state.active_loc_level} Revenue Analysis", expanded=True):
+                    # Simple bar chart instead of a pop-up to avoid crashes
+                    chart = alt.Chart(display_df.head(20)).mark_bar().encode(
+                        x=alt.X(f'{disp_label}:N', sort='-y'), y='Revenue:Q',
+                        color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens')),
+                        tooltip=[disp_label, alt.Tooltip('Revenue:Q', format='$,.0f')]
+                    ).properties(height=400)
+                    st.altair_chart(chart, use_container_width=True)
