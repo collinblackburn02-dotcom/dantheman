@@ -98,8 +98,8 @@ def load_master_graph():
     try:
         for f in files:
             path = f"s3://leadnav-demo-data/{f}"
-            # 🚨 FIX: Added encoding='cp1252' to handle special characters (Registered symbols, quotes, etc)
-            temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='cp1252')
+            # 🚨 FIX: Using 'latin1' encoding to bypass all charmap/utf-8 decoder errors
+            temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1')
             dataframes.append(temp_df)
             
         df = pd.concat(dataframes, axis=0, ignore_index=True)
@@ -126,7 +126,7 @@ def load_master_graph():
         df = df.rename(columns={email_col: 'Email'})
         df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
         
-        # CRITICAL INDEX RESET after explosion
+        # CRITICAL INDEX RESET
         df = df.explode('Email').reset_index(drop=True)
         df['Email'] = df['Email'].str.strip()
         
@@ -139,10 +139,10 @@ if st.session_state.app_state == "onboarding":
     st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
     uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
     if uploaded_file:
-        # Added encoding here too just in case the uploaded file is messy
-        df_orders = pd.read_csv(uploaded_file, encoding='cp1252')
+        # Added latin1 here too for safety
+        df_orders = pd.read_csv(uploaded_file, encoding='latin1')
         df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date'})
-        with st.spinner("Analyzing Combined Identity Graph..."):
+        with st.spinner("Resolving Combined Identity Graph..."):
             df_master = load_master_graph()
             df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
             df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
@@ -164,7 +164,6 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # UPDATED VARIABLE ORDER
     configs = [
         ("Gender", "gender"), 
         ("Marital Status", "marital_status"), 
@@ -190,7 +189,6 @@ elif st.session_state.app_state == "dashboard":
                         st.write("**South:** AL, AR, DC, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV")
                         st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
 
-                # --- CLEAN TOOLTIP CHART ---
                 chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
                     theta="Revenue:Q",
                     color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
@@ -202,7 +200,6 @@ elif st.session_state.app_state == "dashboard":
                 
                 st.altair_chart(chart, use_container_width=False)
                 
-                # --- SYNCED TABLE ---
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
