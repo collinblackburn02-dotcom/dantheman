@@ -33,13 +33,15 @@ def apply_custom_theme(primary_color):
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
+            
             h3 {{ 
                 color: #2D2421 !important; 
                 font-weight: 700 !important; 
                 text-align: center !important; 
-                padding-top: 3rem !important; 
-                margin-bottom: 0.5rem !important;
+                padding-top: 2rem !important; 
+                margin-bottom: 0rem !important;
             }}
+            
             [data-testid="stMetric"] {{ 
                 background-color: #FFFFFF; 
                 border: 1px solid #E2D7C8; 
@@ -47,8 +49,9 @@ def apply_custom_theme(primary_color):
                 padding: 20px; 
                 text-align: center;
             }}
+            
             .premium-table-container {{ 
-                margin: 1rem auto 4rem auto; 
+                margin: 0rem auto 4rem auto; 
                 border-radius: 12px; 
                 border: 1px solid #E2D7C8; 
                 background: #FFFFFF; 
@@ -57,7 +60,6 @@ def apply_custom_theme(primary_color):
             }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             
-            /* 🚨 CENTERED TABLE HEADERS */
             .premium-table-container th {{ 
                 background-color: #F2EBE1 !important; 
                 color: #3A2A26 !important; 
@@ -82,7 +84,6 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# EXACT STRING MAPPING LOGIC
 def bucket_income(val):
     v = str(val).strip()
     high = ['$250,000 - $499,999', '$500,000+']
@@ -209,14 +210,17 @@ elif st.session_state.app_state == "dashboard":
                         chart_data = chart_data[~chart_data[col_key].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
                         if not chart_data.empty:
                             grp = chart_data.groupby(col_key).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
-                            st.markdown(f"<h3>{label}</h3>", unsafe_allow_html=True)
                             
-                            # 🚨 ADDED PADDING TO PIE CHART TOP
+                            # 🚨 FIX: Moved padding into .properties() and added title offset (dy)
                             chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                                 theta=alt.Theta("Revenue:Q"), 
                                 color=alt.Color(f"{col_key}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=240, columns=2)),
                                 tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
-                            ).configure_view(padding=40).properties(height=450, width="container")
+                            ).properties(
+                                height=500, # Increased height to allow for title offset
+                                width="container",
+                                title=alt.TitleParams(text=label, fontSize=22, anchor='middle', dy=-20) # dy pushes title up
+                            )
                             
                             st.altair_chart(chart, use_container_width=True)
                             
