@@ -28,6 +28,18 @@ STATE_TO_REGION = {
 
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Audience Engine", page_icon="🧬", layout="wide")
 
+# 🚨 DEFINED AT TOP LEVEL TO PREVENT YOUR ERROR
+@st.dialog("🔒 Secure Access Required")
+def login_modal():
+    st.write("Please enter the password to view the complete Customer DNA profile.")
+    pwd = st.text_input("Password", type="password")
+    if st.button("Unlock Dashboard", use_container_width=True):
+        if pwd == DEMO_PASSWORD:
+            st.session_state.is_unlocked = True
+            st.rerun()
+        else:
+            st.error("Incorrect Password")
+
 def apply_custom_theme(primary_color):
     st.markdown(f"""
         <style>
@@ -77,7 +89,6 @@ def load_master_graph():
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
-        
         if 'zip_code' in df.columns:
             df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
             df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
@@ -111,36 +122,28 @@ if st.session_state.app_state == "onboarding":
                     st.rerun()
 
 elif st.session_state.app_state == "dashboard":
+    # 🚨 POP-UP SECURITY TRIGGER 🚨
+    c1, c2, _ = st.columns([1, 1, 4])
     if not st.session_state.is_unlocked:
-        @st.dialog("🔒 Secure Access Required")
-        def login_modal():
-            st.write("Please enter the password to view the complete Customer DNA profile.")
-            pwd = st.text_input("Password", type="password")
-            if st.button("Unlock Dashboard", use_container_width=True, kind="primary"):
-                if pwd == DEMO_PASSWORD:
-                    st.session_state.is_unlocked = True
-                    st.rerun()
-                else:
-                    st.error("Incorrect Password")
-        
-        c1, c2, _ = st.columns([1, 1, 4])
         if c1.button("🔑 Unlock Full Profile", kind="primary"): login_modal()
-        if c2.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.rerun()
     else:
-        c1, _ = st.columns([1, 5])
-        if c1.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.session_state.is_unlocked = False; st.rerun()
+        st.success("✅ Full Profile Unlocked")
+        
+    if c2.button("🔄 New Analysis"): 
+        st.session_state.app_state = "onboarding"
+        st.session_state.is_unlocked = False
+        st.rerun()
 
     full_df = st.session_state.df_icp
     df_p = full_df if st.session_state.is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # 1. MACRO METRICS
+    # KPIs and Summary
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. TOP PERFORMING DEMOGRAPHICS
     st.markdown("### 🏆 Top Performing Demographics")
     total_rev = df_p['revenue_raw'].sum()
     summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
@@ -156,8 +159,7 @@ elif st.session_state.app_state == "dashboard":
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # 3. SINGLE VARIABLE DEEP DIVE
-    st.markdown("### 🔍 Single Variable Deep Dive")
+    # Deep Dive and Tables
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
     if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
@@ -190,27 +192,20 @@ elif st.session_state.app_state == "dashboard":
             display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
             render_premium_table(display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green))
 
-            # 🚨 REVENUE HEATMAP EXPANDER
             if st.session_state.active_var == "Location":
                 with st.expander(f"🗺️ View {display_label} Revenue Heatmap", expanded=True):
+                    # Heatmap Chart Logic
+                    chart_col = display_label.upper()
                     if st.session_state.active_loc_level in ["State", "Region"]:
-                        # Geographic Heatmap (State/Region level)
-                        map_chart = alt.Chart(display_df).mark_bar().encode(
-                            x=alt.X('Revenue:Q', title="Total Revenue"),
-                            y=alt.Y(f'{display_label.upper()}:N', sort='-x', title=display_label),
-                            color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
-                            tooltip=[display_label.upper(), alt.Tooltip('Revenue:Q', format='$,.2f')]
-                        ).properties(height=350, title=f"Revenue Distribution by {display_label}")
-                        st.altair_chart(map_chart, use_container_width=True)
+                        chart = alt.Chart(display_df).mark_bar().encode(
+                            x='Revenue:Q', y=alt.Y(f'{chart_col}:N', sort='-x'),
+                            color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens')),
+                            tooltip=[chart_col, alt.Tooltip('Revenue:Q', format='$,.2f')]
+                        ).properties(height=400)
                     else:
-                        # Zip Code Concentration Chart
-                        zip_chart = alt.Chart(display_df.head(20)).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
-                            x=alt.X(f'{display_label.upper()}:N', sort='-y', title="Zip Code"),
-                            y=alt.Y('Revenue:Q', title="Total Revenue"),
-                            color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
-                            tooltip=[display_label.upper(), alt.Tooltip('Revenue:Q', format='$,.2f')]
-                        ).properties(height=350, title="Top 20 High-Revenue Zip Codes")
-                        st.altair_chart(zip_chart, use_container_width=True)
-            display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
-            styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
-            render_premium_table(styler)
+                        chart = alt.Chart(display_df.head(20)).mark_bar().encode(
+                            x=alt.X(f'{chart_col}:N', sort='-y'), y='Revenue:Q',
+                            color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens')),
+                            tooltip=[chart_col, alt.Tooltip('Revenue:Q', format='$,.2f')]
+                        ).properties(height=400)
+                    st.altair_chart(chart, use_container_width=True)
