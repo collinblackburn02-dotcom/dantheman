@@ -4,10 +4,11 @@ import matplotlib.colors as mcolors
 import os
 import altair as alt
 
-# ================ PITCH CONFIGURATION =================
+# ================ 1. PITCH CONFIGURATION =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#0A2540" 
 
+# 🚨 THE DATA MAPPER
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
@@ -20,6 +21,7 @@ AWS_COLUMN_MAPPER = {
     "SKIPTRACE_CREDIT_RATING": "credit_raw"
 }
 
+# 🗺️ REGIONAL MAPPING
 STATE_TO_REGION = {
     'CT':'Northeast','MA':'Northeast','ME':'Northeast','NH':'Northeast','NJ':'Northeast','NY':'Northeast','PA':'Northeast','RI':'Northeast','VT':'Northeast',
     'IA':'Midwest','IL':'Midwest','IN':'Midwest','KS':'Midwest','MI':'Midwest','MN':'Midwest','MO':'Midwest','ND':'Midwest','NE':'Midwest','OH':'Midwest','SD':'Midwest','WI':'Midwest',
@@ -27,8 +29,11 @@ STATE_TO_REGION = {
     'AK':'West','AZ':'West','CA':'West','CO':'West','HI':'West','ID':'West','MT':'West','NM':'West','NV':'West','OR':'West','UT':'West','WA':'West','WY':'West'
 }
 
+# =========================================================
+
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="centered")
 
+# INITIALIZE SESSION STATE
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "df_icp" not in st.session_state: st.session_state.df_icp = None
 
@@ -61,7 +66,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# 🚨 DETAILED BUCKETING LOGIC 🚨
+# 🚨 DETAILED BUCKETING HELPERS
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -83,11 +88,20 @@ def bucket_credit(val):
     if v in ['F', 'G']: return "Low (F, G)"
     return "Unknown"
 
+# ================ 2. LIVE AWS CONNECTION (MULTI-FILE) =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
+    files = ["master_data.csv", "visitor_data_2.csv"] 
+    dataframes = []
+    
     try:
-        df = pd.read_csv("s3://leadnav-demo-data/master_data.csv", storage_options=aws_keys, low_memory=False)
+        for f in files:
+            path = f"s3://leadnav-demo-data/{f}"
+            temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False)
+            dataframes.append(temp_df)
+            
+        df = pd.concat(dataframes, axis=0, ignore_index=True)
         df.columns = [c.lower() for c in df.columns]
         df = df.reset_index(drop=True)
         
@@ -100,30 +114,33 @@ def load_master_graph():
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
         
-        # Gender & Marital Logic
+        # Gender & Marital Polish
         if 'gender' in df.columns:
             df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns:
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
-        # Explosion Fix
+        # Multi-Email Explosion Fix
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
         df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
+        
+        # CRITICAL INDEX RESET after explosion
         df = df.explode('Email').reset_index(drop=True)
         df['Email'] = df['Email'].str.strip()
         
         return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 AWS Error: {e}"); st.stop()
+        st.error(f"🚨 AWS Combine Error: {e}"); st.stop()
 
+# ================ 3. STATE 1: ONBOARDING =================
 if st.session_state.app_state == "onboarding":
     st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Upload Customer File", type=["csv"])
+    uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
     if uploaded_file:
         df_orders = pd.read_csv(uploaded_file)
         df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date'})
-        with st.spinner("Analyzing Identity Graph..."):
+        with st.spinner("Analyzing Combined Identity Graph..."):
             df_master = load_master_graph()
             df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
             df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
@@ -132,6 +149,7 @@ if st.session_state.app_state == "onboarding":
                 st.session_state.app_state = "dashboard"
                 st.rerun()
 
+# ================ 4. STATE 2: DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
     st.markdown(f"## 🧬 Identity Match Result")
     if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
@@ -144,7 +162,7 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # 🚨 UPDATED VARIABLE ORDER 🚨
+    # UPDATED VARIABLE ORDER
     configs = [
         ("Gender", "gender"), 
         ("Marital Status", "marital_status"), 
@@ -163,7 +181,6 @@ elif st.session_state.app_state == "dashboard":
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
                 
-                # 🏷️ REGIONAL MAP BACK IN
                 if col == "region":
                     with st.expander("📍 View Regional Identity Map"):
                         st.write("**Northeast:** CT, MA, ME, NH, NJ, NY, PA, RI, VT")
