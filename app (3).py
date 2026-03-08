@@ -1,24 +1,21 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.colors as mcolors
-import os
 import altair as alt
 
 # ================ 1. PITCH CONFIGURATION =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#0A2540" 
 
-# Maps your raw AWS headers to our clean dashboard labels
+# Mapping raw headers to clean labels
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
     "AGE_RANGE": "age",
-    "INCOME_RANGE": "income_raw",
+    "INCOME_RANGE": "income",
     "PERSONAL_STATE": "state_raw",
-    "NET_WORTH": "net_worth_raw",
-    "CHILDREN": "children",
-    "HOMEOWNER": "homeowner",
-    "SKIPTRACE_CREDIT_RATING": "credit_raw"
+    "NET_WORTH": "net_worth",
+    "SKIPTRACE_CREDIT_RATING": "credit_rating"
 }
 
 STATE_TO_REGION = {
@@ -54,7 +51,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# BUCKETING HELPERS
+# 🚨 UPDATED BUCKETING TO ENSURE LABELS ARE RETURNED EVEN IF INPUT IS MESSY
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -80,8 +77,6 @@ def bucket_credit(val):
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
-    
-    # 🚨 DUAL FILE LOGIC RESTORED 🚨
     files = ["master_data.csv", "visitor_data_2.csv"] 
     dataframes = []
     
@@ -90,28 +85,22 @@ def load_master_graph():
             path = f"s3://leadnav-demo-data/{f}"
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             temp_df.columns = [c.upper() for c in temp_df.columns]
-            
-            # Normalize email column name per file
-            email_opts = ['PERSONAL_EMAILS', 'EMAIL', 'EMAIL_ADDRESS']
-            found_email = next((c for c in temp_df.columns if c in email_opts), None)
-            if not found_email:
-                found_email = next((c for c in temp_df.columns if 'EMAIL' in c and 'SHA' not in c), temp_df.columns[0])
-            
-            temp_df = temp_df.rename(columns={found_email: 'Email'})
             dataframes.append(temp_df)
             
-        # Stack all sources
-        df = pd.concat(dataframes, axis=0, ignore_index=True)
-        df = df.reset_index(drop=True)
+        df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
         
-        # Mapping
+        # Mapping Logic
         df = df.rename(columns=AWS_COLUMN_MAPPER)
         
-        # Transformations
-        if 'STATE_RAW' in df.columns: df['region'] = df['STATE_RAW'].str.strip().str.upper().map(STATE_TO_REGION)
-        if 'INCOME_RAW' in df.columns: df['income'] = df['INCOME_RAW'].apply(bucket_income)
-        if 'NET_WORTH_RAW' in df.columns: df['net_worth'] = df['NET_WORTH_RAW'].apply(bucket_nw)
-        if 'CREDIT_RAW' in df.columns: df['credit_rating'] = df['CREDIT_RAW'].apply(bucket_credit)
+        # Force lower-case for our dashboard labels to avoid mismatches
+        df.columns = [c.lower() for c in df.columns]
+        
+        # Transformations (using lower-case mapped names)
+        if 'state_raw' in df.columns: 
+            df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Other')
+        if 'income' in df.columns: df['income'] = df['income'].apply(bucket_income)
+        if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].apply(bucket_nw)
+        if 'credit_rating' in df.columns: df['credit_rating'] = df['credit_rating'].apply(bucket_credit)
         
         if 'gender' in df.columns:
             df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
@@ -119,13 +108,14 @@ def load_master_graph():
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
         # Clean Emails
-        df['Email'] = df['Email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
-        df = df.explode('Email').reset_index(drop=True)
-        df['Email'] = df['Email'].str.strip()
+        email_col = next((c for c in df.columns if 'email' in c), 'email')
+        df['email'] = df[email_col].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
+        df = df.explode('email').reset_index(drop=True)
+        df['email'] = df['email'].str.strip()
         
-        return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
+        return df.drop_duplicates(subset=['email'], keep='first').reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 Identity Graph Load Error: {e}"); st.stop()
+        st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
 
 # ================ 3. STATE 1: ONBOARDING =================
 if st.session_state.app_state == "onboarding":
@@ -133,13 +123,13 @@ if st.session_state.app_state == "onboarding":
     uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
     if uploaded_file:
         df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
-        df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date'})
+        df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date', 'Email': 'email'})
         
         with st.spinner("Resolving Combined Identity Graph..."):
             df_master = load_master_graph()
-            df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
+            df_orders['email'] = df_orders['email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
             
-            df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
+            df_joined = pd.merge(df_orders, df_master, on='email', how='inner').reset_index(drop=True)
             
             if not df_joined.empty:
                 st.session_state.df_icp = df_joined
@@ -161,21 +151,25 @@ elif st.session_state.app_state == "dashboard":
     with m2: st.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Full list check
+    # 🚨 ALL 7 VARIABLES LISTED EXPLICITLY 🚨
     configs = [
         ("Gender", "gender"), 
         ("Marital Status", "marital_status"), 
+        ("Age Range", "age"),
         ("Credit Rating", "credit_rating"), 
         ("Household Income", "income"), 
         ("Net Worth", "net_worth"), 
-        ("Geographic Region", "region"), 
-        ("Age Range", "age")
+        ("Geographic Region", "region")
     ]
 
     for label, col in configs:
+        # Check if column exists, even if it has NaNs
         if col in df.columns:
-            df_plot = df[~df[col].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', '', 'other'])]
-            grp = df_plot.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+            # Group by column to see what we have
+            grp = df.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+            
+            # Remove purely "empty" rows for the chart
+            grp = grp[~grp[col].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
             
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
@@ -200,3 +194,6 @@ elif st.session_state.app_state == "dashboard":
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
                 
                 render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}).background_gradient(subset=['% Share'], cmap=custom_light_green))
+            else:
+                # If we have matches but this specific variable is empty, let the user know
+                st.info(f"ℹ️ {label} data is unavailable for this specific matched segment.")
