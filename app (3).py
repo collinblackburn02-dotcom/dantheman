@@ -57,6 +57,13 @@ def apply_custom_theme(primary_color):
             }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; padding: 10px; text-transform: uppercase; font-size: 0.7rem; }}
+            
+            /* 🚨 BOLD THE FIRST COLUMN (Variable Names) */
+            .premium-table-container td:first-child {{ 
+                font-weight: 700 !important; 
+                color: #2D2421;
+            }}
+            
             .premium-table-container td {{ text-align: center !important; padding: 8px; border-bottom: 1px solid #F0EAD6; font-size: 0.85rem; }}
         </style>
     """, unsafe_allow_html=True)
@@ -177,7 +184,7 @@ elif st.session_state.app_state == "dashboard":
     with m2: st.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # 🚨 UPDATED CONFIG: Income and Net Worth hidden for now 🚨
+    # Variables to display
     configs = [
         ("Gender", "gender"), ("Marital Status", "marital_status"), 
         ("Age Range", "age"), ("Credit Rating", "credit_rating"), 
@@ -196,12 +203,16 @@ elif st.session_state.app_state == "dashboard":
                         if not chart_data.empty:
                             grp = chart_data.groupby(col_key).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
                             st.markdown(f"<h3>{label}</h3>", unsafe_allow_html=True)
+                            
                             chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                                 theta=alt.Theta("Revenue:Q"), 
                                 color=alt.Color(f"{col_key}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=240, columns=2)),
                                 tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
                             ).properties(height=450, width="container")
                             st.altair_chart(chart, use_container_width=True)
+                            
                             grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                             grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
+                            
+                            # Standard table rendering
                             render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
