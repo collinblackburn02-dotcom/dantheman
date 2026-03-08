@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.colors as mcolors
-import altair as alt
 
 # ================ 1. CONFIGURATION & THEME =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
@@ -34,13 +33,20 @@ def apply_custom_theme(primary_color):
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
+            
+            /* Hide Sidebar */
             [data-testid="stSidebar"], [data-testid="collapsedControl"] {{ display: none !important; }}
+
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
+            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
+            
+            /* Clean Delta Labels (No Arrows) */
             [data-testid="stMetricDelta"] svg {{ display: none !important; }}
             [data-testid="stMetricDelta"] div {{ margin-left: 0 !important; }}
+            
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; margin-bottom: 2rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -97,10 +103,10 @@ if st.session_state.app_state == "onboarding":
                 df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.strip()
                 df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
                 
-                # 🚨 OPTIMIZATION: Clean revenue ONCE
+                # Pre-clean Revenue
                 df_joined['revenue_raw'] = pd.to_numeric(df_joined['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
                 
-                # 🚨 OPTIMIZATION: Pre-calculate Top Performers
+                # Pre-calculate Summary
                 total_rev = df_joined['revenue_raw'].sum()
                 summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
                 top_perf = {}
@@ -116,7 +122,9 @@ if st.session_state.app_state == "onboarding":
                 st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    if st.button("🔄 New Analysis"): 
+    # Selection Controls
+    c1, _ = st.columns([1, 5])
+    if c1.button("🔄 New Analysis"): 
         st.session_state.app_state = "onboarding"
         st.rerun()
 
@@ -128,7 +136,7 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. TOP PERFORMING DEMOGRAPHICS (Uses Cached State)
+    # 2. TOP PERFORMING DEMOGRAPHICS
     st.markdown("### 🏆 Top Performing Demographics")
     summary_cols = st.columns(len(st.session_state.top_performers))
     for i, (label, data) in enumerate(st.session_state.top_performers.items()):
@@ -161,7 +169,7 @@ elif st.session_state.app_state == "dashboard":
         active_col = dict(configs)[st.session_state.active_var]
         display_label = st.session_state.active_var
 
-    # 4. PROCESSING & PITCH-READY CHART
+    # 4. PROCESSING & PURE TABLE (FAST RENDER)
     if active_col in df_p.columns:
         df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
         df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
@@ -171,20 +179,10 @@ elif st.session_state.app_state == "dashboard":
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
             disp_name = display_label.upper()
             
-            # 🚨 OPTIMIZATION: Cap Zip Codes to avoid browser lag
+            # Cap rows for browser performance
             display_df = df_p_grp.rename(columns={active_col: disp_name}).sort_values('Revenue', ascending=False)
             if display_label == "Zip Code": display_df = display_df.head(100)
             
+            # Premium Table Rendering
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Revenue', '% of Buyers'], cmap=custom_light_green)
             st.markdown(f'<div class="premium-table-container">{styler.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
-
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            with st.expander(f"📊 {display_label} Distribution Analysis", expanded=True):
-                chart_df = display_df.head(15).copy()
-                pretty_chart = alt.Chart(chart_df).mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, stroke="#E2D7C8", strokeWidth=0.5).encode(
-                    x=alt.X(f'{disp_name}:N', sort='-y', axis=alt.Axis(labelAngle=-45, title=None, labelFont='Outfit', labelFontSize=12)),
-                    y=alt.Y('Revenue:Q', axis=alt.Axis(format='$,.0f', grid=True, title="Total Revenue ($)", titleFont='Outfit')),
-                    color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
-                    tooltip=[disp_name, alt.Tooltip('Revenue:Q', format='$,.2f')]
-                ).configure_view(strokeOpacity=0).properties(height=400)
-                st.altair_chart(pretty_chart, use_container_width=True)
