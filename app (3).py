@@ -8,7 +8,6 @@ import altair as alt
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#0A2540" 
 
-# 🚨 THE DATA MAPPER
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
@@ -21,7 +20,6 @@ AWS_COLUMN_MAPPER = {
     "SKIPTRACE_CREDIT_RATING": "credit_raw"
 }
 
-# 🗺️ REGIONAL MAPPING
 STATE_TO_REGION = {
     'CT':'Northeast','MA':'Northeast','ME':'Northeast','NH':'Northeast','NJ':'Northeast','NY':'Northeast','PA':'Northeast','RI':'Northeast','VT':'Northeast',
     'IA':'Midwest','IL':'Midwest','IN':'Midwest','KS':'Midwest','MI':'Midwest','MN':'Midwest','MO':'Midwest','ND':'Midwest','NE':'Midwest','OH':'Midwest','SD':'Midwest','WI':'Midwest',
@@ -29,11 +27,8 @@ STATE_TO_REGION = {
     'AK':'West','AZ':'West','CA':'West','CO':'West','HI':'West','ID':'West','MT':'West','NM':'West','NV':'West','OR':'West','UT':'West','WA':'West','WY':'West'
 }
 
-# =========================================================
-
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="centered")
 
-# INITIALIZE SESSION STATE
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "df_icp" not in st.session_state: st.session_state.df_icp = None
 
@@ -45,15 +40,7 @@ def apply_custom_theme(primary_color):
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 700 !important; }}
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; }}
-            
-            .premium-table-container {{ 
-                width: 700px !important; 
-                margin: 0 auto 5rem auto; 
-                border-radius: 12px; 
-                border: 1px solid #E2D7C8; 
-                background: #FFFFFF; 
-                overflow: hidden;
-            }}
+            .premium-table-container {{ width: 700px !important; margin: 0 auto 5rem auto; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; padding: 12px; text-transform: uppercase; font-size: 0.75rem; }}
             .premium-table-container td {{ text-align: center !important; padding: 10px; border-bottom: 1px solid #F0EAD6; font-size: 0.9rem; }}
@@ -66,7 +53,6 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# 🚨 DETAILED BUCKETING HELPERS
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -98,8 +84,8 @@ def load_master_graph():
     try:
         for f in files:
             path = f"s3://leadnav-demo-data/{f}"
-            # 🚨 FIX: Using 'latin1' encoding to bypass all charmap/utf-8 decoder errors
-            temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1')
+            # 🚨 FIX: Added 'on_bad_lines' to ignore rows with too many commas
+            temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             dataframes.append(temp_df)
             
         df = pd.concat(dataframes, axis=0, ignore_index=True)
@@ -109,24 +95,19 @@ def load_master_graph():
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
         
-        # Mapping Logic
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
         if 'income_raw' in df.columns: df['income'] = df['income_raw'].apply(bucket_income)
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
         
-        # Gender & Marital Polish
         if 'gender' in df.columns:
             df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns:
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
-        # Multi-Email Explosion Fix
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
         df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
-        
-        # CRITICAL INDEX RESET
         df = df.explode('Email').reset_index(drop=True)
         df['Email'] = df['Email'].str.strip()
         
@@ -139,8 +120,7 @@ if st.session_state.app_state == "onboarding":
     st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
     uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
     if uploaded_file:
-        # Added latin1 here too for safety
-        df_orders = pd.read_csv(uploaded_file, encoding='latin1')
+        df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
         df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date'})
         with st.spinner("Resolving Combined Identity Graph..."):
             df_master = load_master_graph()
@@ -165,13 +145,8 @@ elif st.session_state.app_state == "dashboard":
     st.markdown("<hr>", unsafe_allow_html=True)
 
     configs = [
-        ("Gender", "gender"), 
-        ("Marital Status", "marital_status"), 
-        ("Credit Rating", "credit_rating"), 
-        ("Household Income", "income"), 
-        ("Net Worth", "net_worth"), 
-        ("Geographic Region", "region"), 
-        ("Age Range", "age")
+        ("Gender", "gender"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating"), 
+        ("Household Income", "income"), ("Net Worth", "net_worth"), ("Geographic Region", "region"), ("Age Range", "age")
     ]
 
     for label, col in configs:
@@ -181,7 +156,6 @@ elif st.session_state.app_state == "dashboard":
             
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
-                
                 if col == "region":
                     with st.expander("📍 View Regional Identity Map"):
                         st.write("**Northeast:** CT, MA, ME, NH, NJ, NY, PA, RI, VT")
@@ -190,20 +164,12 @@ elif st.session_state.app_state == "dashboard":
                         st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
 
                 chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
-                    theta="Revenue:Q",
-                    color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
-                    tooltip=[
-                        alt.Tooltip(f'{col}:N', title=label), 
-                        alt.Tooltip('Revenue:Q', format='$,.0f')
-                    ]
+                    theta="Revenue:Q", color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
+                    tooltip=[alt.Tooltip(f'{col}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
                 ).properties(width=700, height=450)
                 
                 st.altair_chart(chart, use_container_width=False)
-                
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
-                
-                styler = grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}) \
-                        .background_gradient(subset=['% Share'], cmap=custom_light_green)
-                render_premium_table(styler)
+                render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}).background_gradient(subset=['% Share'], cmap=custom_light_green))
