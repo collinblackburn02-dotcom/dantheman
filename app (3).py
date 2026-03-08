@@ -4,7 +4,11 @@ import matplotlib.colors as mcolors
 import os
 import altair as alt
 
-# ================ 0. PITCH CONFIGURATION =================
+# ================ ZLIB & PITCH CONFIGURATION =================
+# If your app runs locally but crashes on Streamlit Cloud, you need to add zlib.
+# It is critical for pandas to read compressed S3 data.
+# 🚨 Add 'libz-dev' to a new file named 'packages.txt' in your repo's root folder!
+
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#0A2540" 
 
@@ -45,8 +49,13 @@ def apply_custom_theme(primary_color):
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 700 !important; }}
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; }}
-            .premium-table-container {{ width: 100%; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; margin-bottom: 5rem; }}
-            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; text-transform: uppercase; font-size: 0.75rem; }}
+            [data-testid="stMetricLabel"] {{ color: {primary_color} !important; }}
+            [data-testid="stMetricValue"] {{ color: #2D2421 !important; font-size: 2.5rem; }}
+            .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; margin-bottom: 5rem; width: fit-content; max-width: 100%; }}
+            .premium-table-container table {{ width: auto !important; border-collapse: collapse !important; table-layout: fixed; }}
+            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; text-transform: uppercase; font-size: 0.75rem; text-align: center !important; white-space: nowrap; }}
+            .premium-table-container td {{ text-align: center !important; padding: 10px 14px !important; border-bottom: 1px solid #F0EAD6 !important; font-size: 0.9rem !important; }}
+            [data-testid="column"] {{ text-align: left; }}
         </style>
     """, unsafe_allow_html=True)
 
@@ -56,42 +65,45 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# BUCKETING HELPERS
+# 🚨 UPDATED SIMPLIFIED BUCKETING HELPERS
 def bucket_income(val):
     v = str(val).lower()
-    if any(x in v for x in ['250', '500']): return "High Earner ($250k+)"
-    if any(x in v for x in ['125', '150', '175', '200']): return "Upper Middle ($125k-$249k)"
-    if any(x in v for x in ['50', '75', '100']): return "Middle Class ($50k-$124k)"
-    return "Emerging (Under $50k)"
+    if any(x in v for x in ['250', '500']): return "High"
+    if any(x in v for x in ['125', '150', '175', '200']): return "Medium-High"
+    if any(x in v for x in ['50', '75', '100']): return "Medium"
+    return "Low"
 
 def bucket_nw(val):
     v = str(val).lower()
-    if any(x in v for x in ['1,000', '2,000', '5,000']): return "High Net Worth ($1M+)"
-    if any(x in v for x in ['250', '500']): return "Mass Affluent ($250k-$999k)"
-    if any(x in v for x in ['50', '100']): return "Emerging Wealth ($50k-$249k)"
-    return "Entry Level (Under $50k)"
+    if any(x in v for x in ['1,000', '2,000', '5,000']): return "High"
+    if any(x in v for x in ['250', '500']): return "Medium-High"
+    if any(x in v for x in ['50', '100']): return "Medium"
+    return "Low"
 
 def bucket_credit(val):
     v = str(val).upper().strip()
-    if v in ['A', 'B', 'C']: return "Elite/Prime (A, B, C)"
-    if v in ['D', 'E']: return "Standard (D, E)"
-    if v in ['F', 'G']: return "Developing (F, G)"
-    return "U"
+    # Range is ABC -> Elite/Prime. FG -> Low/Developing.
+    # Grouping into 3 logical simplified categories matching 3 original number logical categories.
+    if v in ['A', 'B', 'C']: return "High" # Elite/Prime
+    if v in ['D', 'E']: return "Medium" # Standard
+    if v in ['F', 'G']: return "Low" # Developing
+    return "U" # Unknown
 
 # ================ 2. LIVE AWS CONNECTION =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
     try:
+        # Check context again - zlib libz-dev required for cloud.
         df = pd.read_csv("s3://leadnav-demo-data/master_data.csv", storage_options=aws_keys, low_memory=False)
         df.columns = [c.lower() for c in df.columns]
         
-        # 1. First Index Reset
         df = df.reset_index(drop=True)
         
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
         
+        # B2C Transformation with logic. Applying mapping logic to raw columns.
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
         if 'income_raw' in df.columns: df['income'] = df['income_raw'].apply(bucket_income)
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
@@ -102,50 +114,73 @@ def load_master_graph():
         df = df.rename(columns={email_col: 'Email'})
         df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
         
-        # 2. Explode creates duplicate index labels
         df = df.explode('Email')
         df['Email'] = df['Email'].str.strip()
         
-        # 3. CRITICAL: Reset Index after explosion to kill the 'Duplicate Labels' error
-        df = df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
-        
-        return df
+        # FINAL Deduplication Shield
+        return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
 
 # ================ 3. DASHBOARD LOGIC =================
 if st.session_state.app_state == "onboarding":
-    st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Upload Customer File", type=["csv"])
-    if uploaded_file:
-        df_orders = pd.read_csv(uploaded_file)
-        df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date'})
-        with st.spinner("Analyzing Identity Graph..."):
-            df_master = load_master_graph()
-            df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
             
-            # Merge logic
-            df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
+    st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem; color: {PITCH_BRAND_COLOR};'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; font-size: 1.5rem; color: #444; margin-top: -15px;'>Identity Resolution Engine</h2>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<p style='text-align: center; margin-bottom: 2rem;'>Unlock Customer DNA. Upload your sales/order CSV. We securely match emails against our identity graph to reveal demographic and financial profiles.</p>", unsafe_allow_html=True)
+        st.markdown("### Process Historical Orders")
+        uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"], label_visibility="collapsed")
+        
+        if uploaded_file is not None:
+            df_orders = pd.read_csv(uploaded_file)
+            shopify_map = {'Name': 'Order ID', 'Created at': 'Date'}
+            df_orders = df_orders.rename(columns=shopify_map)
             
-            if not df_joined.empty:
-                st.session_state.df_icp = df_joined
-                st.session_state.app_state = "dashboard"
-                st.rerun()
+            if "Email" not in df_orders.columns:
+                st.error("⚠️ CSV missing 'Email' column.")
+            else:
+                with st.spinner("Connecting to Identity Graph..."):
+                    df_master_aws = load_master_graph()
+                    # Shopify mapper
+                    df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
+                    
+                    # Merge logic
+                    df_joined = pd.merge(df_orders, df_master_aws, on='Email', how='inner').reset_index(drop=True)
+                    
+                    if not df_joined.empty:
+                        st.session_state.df_icp = df_joined
+                        st.session_state.app_state = "dashboard"
+                        st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    st.title("🧬 Customer DNA Analysis")
-    if st.button("← New Upload"): st.session_state.app_state = "onboarding"; st.rerun()
+    st.markdown(f"<h1 style='color: {PITCH_BRAND_COLOR};'>🧬 Identity Match Dashboard</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #666; font-size: 1.1rem; margin-top: -15px; margin-bottom: 20px;'>Successfully resolved identities via the LeadNavigator Identity Graph.</p>", unsafe_allow_html=True)
     
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
+    
+    st.markdown("<br>", unsafe_allow_html=True)
     df = st.session_state.df_icp
+    # Format and clean total before KPI calc
     df['Total'] = pd.to_numeric(df['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
-    c1, c2 = st.columns(2)
-    c1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
-    c2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
+    col_metric1, col_metric2 = st.columns(2)
+    with col_metric1: st.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
+    with col_metric2: st.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
+    st.markdown("<br><hr><br>", unsafe_allow_html=True)
 
+    # LOOP THROUGH B2C VARIABLES FOR VISUALS
     display_configs = [
         ("Credit Rating Score", "credit_rating"), ("Household Income", "income"), ("Net Worth Segment", "net_worth"), 
-        ("Regional Footprint", "region"), ("Age Range", "age"), ("Gender", "gender"), ("Marital Status", "marital_status")
+        ("Geographic Region", "region"), ("Age Range", "age"), ("Gender", "gender"), ("Marital Status", "marital_status")
     ]
 
     for label, col in display_configs:
@@ -154,9 +189,6 @@ elif st.session_state.app_state == "dashboard":
             grp = df_plot.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
-                # Force numeric before percentage math
-                grp['Revenue'] = pd.to_numeric(grp['Revenue'], errors='coerce').fillna(0)
-                
                 st.markdown(f"## {label}")
                 if col == "region":
                     with st.expander("📍 View Regional Identity Map"):
@@ -165,13 +197,36 @@ elif st.session_state.app_state == "dashboard":
                         st.write("**South:** AL, AR, DC, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV")
                         st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
 
-                chart = alt.Chart(grp).mark_arc(innerRadius=80, stroke="#fff").encode(
-                    theta="Revenue:Q", color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", columns=2)),
+                # --- 🚨 NEW Altair layered chart forprettier pie and labels 🚨 ---
+                base = alt.Chart(grp).encode(
+                    theta=alt.Theta(field="Revenue", type="quantitative"),
+                    order=alt.Order(field="Revenue", sort="descending")
+                )
+
+                # Arcs layer (legend=None removes the legend)
+                arcs = base.mark_arc(innerRadius=80, stroke="#fff").encode(
+                    color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=None),
                     tooltip=[col, alt.Tooltip('Revenue', format='$,.0f')]
-                ).properties(height=500)
+                )
+
+                # Text labels layer (fontSize increased and outside pie)
+                text = base.mark_text(radiusOffset=30, fontSize=16, font='Outfit').encode(
+                    text=f"{col}:N",
+                    order=alt.Order(field="Revenue", sort="descending")
+                )
+
+                chart = alt.layer(arcs, text).properties(height=500)
                 st.altair_chart(chart, use_container_width=True)
                 
+                # --- 🚨 UPDATED TABLE DISPLAY: Fit content and Green Gradient 🚨 ---
+                # Add math inside the loop to ensure correct column usage
+                grp['Revenue'] = pd.to_numeric(grp['Revenue'], errors='coerce').fillna(0)
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
+                
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
-                render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}))
+                format_dict = {'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}
+                
+                # Apply green gradient to Percent Share to show ranking
+                styler = grp.style.format(format_dict).background_gradient(subset=['% Share'], cmap=custom_light_green)
+                render_premium_table(styler)
