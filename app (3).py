@@ -19,7 +19,7 @@ AWS_COLUMN_MAPPER = {
     "CHILDREN": "children",
     "MARRIED": "marital_status",
     "HOMEOWNER": "homeowner",
-    "SKIPTRACE_CREDIT_RATING": "credit_rating" # <-- Correctly mapped
+    "SKIPTRACE_CREDIT_RATING": "credit_rating"
 }
 # =========================================================
 
@@ -35,14 +35,11 @@ def apply_custom_theme(primary_color):
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
-            
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; border-radius: 8px; font-weight: 800; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; border-radius: 8px; }}
-            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px 24px; box-shadow: 0 4px 10px rgba(45, 36, 33, 0.04); }}
             [data-testid="stMetricLabel"] {{ color: {primary_color} !important; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.85rem; }}
-            
-            .premium-table-container {{ width: 100%; overflow-x: auto; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; margin-bottom: 5rem; }}
+            .premium-table-container {{ width: 100%; overflow-x: auto; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; margin-bottom: 6rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; padding: 12px 14px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
             .premium-table-container td {{ text-align: center !important; padding: 10px 14px !important; border-bottom: 1px solid #F0EAD6 !important; font-size: 0.9rem !important; }}
@@ -66,9 +63,9 @@ configs = [
     ("Regional Breakdown", "region"), 
     ("Estimated Net Worth", "net_worth"), 
     ("Presence of Children", "children"), 
-    ("Marital Status", "marital_status"), # <-- Added
+    ("Marital Status", "marital_status"), 
     ("Homeownership", "homeowner"), 
-    ("Credit Rating", "credit_rating")     # <-- Added
+    ("Credit Rating", "credit_rating")     
 ]
 
 # ================ 2. LIVE AWS CONNECTION =================
@@ -85,7 +82,10 @@ def load_master_graph():
     try:
         df_master = pd.read_csv(s3_file_path, storage_options=aws_keys, low_memory=False)
         
-        # Safe Mapping
+        # FIX: Reset index immediately after loading to prevent reindexing errors
+        df_master = df_master.reset_index(drop=True)
+        
+        # Mapping
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         current_cols_lower = {c.lower(): c for c in df_master.columns}
         for map_key, map_val in rename_dict.items():
@@ -96,8 +96,11 @@ def load_master_graph():
         email_cols = [col for col in df_master.columns if 'email' in col.lower()]
         if email_cols:
             df_master = df_master.rename(columns={email_cols[0]: 'Email'})
-            df_master['Email'] = df_master['Email'].astype(str).str.lower().str.split(',').explode().str.strip()
-            df_master = df_master.drop_duplicates(subset=['Email'], keep='first')
+            df_master['Email'] = df_master['Email'].astype(str).str.lower().str.split(',')
+            df_master = df_master.explode('Email').str.strip()
+            
+            # FIX: Drop duplicates and Reset Index AGAIN to finalize unique labels
+            df_master = df_master.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
             
         return df_master
     except Exception as e:
@@ -131,7 +134,7 @@ if st.session_state.app_state == "onboarding":
                 df_joined = pd.merge(df_orders, df_master_aws, on='Email', how='inner')
                 
                 if df_joined.empty:
-                    st.error("⚠️ No matches found between S3 and your upload.")
+                    st.error("⚠️ No matches found.")
                 else:
                     st.session_state.df_icp = df_joined
                     st.session_state.app_state = "dashboard"
@@ -155,11 +158,11 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${total_rev:,.2f}")
     st.markdown("<br><hr><br>", unsafe_allow_html=True)
 
-    # Visual Reporting Loop
+    # Visual Reporting Loop (Stacked Single Column)
     for label, col_name in configs:
         if col_name in df_joined.columns:
-            # CLEANING: Filter out "U", "Unknown", etc.
-            df_filtered = df_joined[~df_joined[col_name].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', 'null'])]
+            # CLEANING: Filter out "U", "Unknown", "nan", etc.
+            df_filtered = df_joined[~df_joined[col_name].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', 'null', ''])]
             
             grp = df_filtered.groupby(col_name).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
@@ -167,11 +170,11 @@ elif st.session_state.app_state == "dashboard":
                 st.markdown(f"## {label}")
                 
                 # --- PREMIUM DONUT CHART ---
-                pie_chart = alt.Chart(grp).mark_arc(innerRadius=65, stroke="#fff").encode(
+                pie_chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                     theta=alt.Theta(field="Revenue", type="quantitative"),
-                    color=alt.Color(field=col_name, type="nominal", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="right")),
+                    color=alt.Color(field=col_name, type="nominal", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", columns=3)),
                     tooltip=[col_name, alt.Tooltip('Revenue', format='$,.0f')]
-                ).properties(height=450, width=600)
+                ).properties(height=500, width=600)
                 
                 st.altair_chart(pie_chart, use_container_width=True)
                 
