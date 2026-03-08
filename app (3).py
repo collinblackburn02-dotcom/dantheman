@@ -67,13 +67,12 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# 🚨 EXACT STRING MAPPING LOGIC
+# EXACT STRING MAPPING LOGIC
 def bucket_income(val):
     v = str(val).strip()
     high = ['$250,000 - $499,999', '$500,000+']
     med_high = ['$125,000 - $149,999', '$150,000 - $174,999', '$175,000 - $199,999', '$200,000 - $249,999']
     medium = ['$50,000 - $74,999', '$75,000 - $99,999', '$100,000 - $124,999']
-    
     if v in high: return "High ($250k+)"
     if v in med_high: return "Med-High ($125k-$249k)"
     if v in medium: return "Medium ($50k-$124k)"
@@ -84,7 +83,6 @@ def bucket_nw(val):
     high = ['$1,000,000 - $1,999,999', '$2,000,000 - $4,999,999', '$5,000,000+']
     med_high = ['$250,000 - $499,999', '$500,000 - $999,999']
     medium = ['$50,000 - $99,999', '$100,000 - $249,999']
-    
     if v in high: return "High ($1M+)"
     if v in med_high: return "Med-High ($250k-$999k)"
     if v in medium: return "Medium ($50k-$249k)"
@@ -103,42 +101,32 @@ def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
     files = ["master_data.csv", "visitor_data_2.csv"] 
     dataframes = []
-    
     try:
         for f in files:
             path = f"s3://leadnav-demo-data/{f}"
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             temp_df.columns = [c.upper().strip() for c in temp_df.columns]
-            
             if 'PERSONAL_EMAILS' in temp_df.columns:
                 temp_df = temp_df.rename(columns={'PERSONAL_EMAILS': 'email_match'})
             else:
                 email_fallback = next((c for c in temp_df.columns if 'EMAIL' in c and 'SHA' not in c), temp_df.columns[0])
                 temp_df = temp_df.rename(columns={email_fallback: 'email_match'})
-            
             dataframes.append(temp_df)
-            
         df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
         df = df.rename(columns=AWS_COLUMN_MAPPER)
         df.columns = [c.lower() for c in df.columns]
-        
         if 'state_raw' in df.columns: 
             df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Other')
-        
-        # Apply Exact Bucketing
         if 'income' in df.columns: df['income'] = df['income'].apply(bucket_income)
         if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].apply(bucket_nw)
         if 'credit_rating' in df.columns: df['credit_rating'] = df['credit_rating'].apply(bucket_credit)
-        
         if 'gender' in df.columns:
             df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns:
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
-        
         df['email_match'] = df['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email_match').reset_index(drop=True)
         df['email_match'] = df['email_match'].str.strip()
-        
         return df.drop_duplicates(subset=['email_match'], keep='first').reset_index(drop=True)
     except Exception as e:
         st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
@@ -153,12 +141,10 @@ if st.session_state.app_state == "onboarding":
         if uploaded_file:
             df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
             df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
-            
             with st.spinner("Executing LeadNavigator Identity Resolution..."):
                 df_master = load_master_graph()
                 df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
                 df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
-                
                 if not df_joined.empty:
                     st.session_state.df_icp = df_joined
                     st.session_state.app_state = "dashboard"
@@ -170,10 +156,8 @@ elif st.session_state.app_state == "dashboard":
         st.title("🔒 Security")
         pwd = st.text_input("Enter Dashboard Password", type="password")
         is_unlocked = (pwd == DEMO_PASSWORD)
-        if is_unlocked:
-            st.success("Full Access Granted")
-        else:
-            st.warning("Preview Mode: First 100 Matches")
+        if is_unlocked: st.success("Full Access Granted")
+        else: st.warning("Preview Mode: First 100 Matches")
 
     st.markdown(f"<h2 style='text-align: center;'>🧬 Identity Match Result {'(Unlocked)' if is_unlocked else '(Restricted)'}</h2>", unsafe_allow_html=True)
     if st.button("← New Analysis", type="secondary"): 
@@ -188,16 +172,15 @@ elif st.session_state.app_state == "dashboard":
         df = full_df.copy()
 
     df['revenue_raw'] = pd.to_numeric(df['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
-
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
     with m2: st.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # 🚨 UPDATED CONFIG: Income and Net Worth hidden for now 🚨
     configs = [
         ("Gender", "gender"), ("Marital Status", "marital_status"), 
         ("Age Range", "age"), ("Credit Rating", "credit_rating"), 
-        ("Household Income", "income"), ("Net Worth", "net_worth"), 
         ("Geographic Region", "region")
     ]
 
@@ -210,25 +193,15 @@ elif st.session_state.app_state == "dashboard":
                     if col_key in df.columns:
                         chart_data = df.copy()
                         chart_data = chart_data[~chart_data[col_key].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
-                        
                         if not chart_data.empty:
                             grp = chart_data.groupby(col_key).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
                             st.markdown(f"<h3>{label}</h3>", unsafe_allow_html=True)
-                            
                             chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                                 theta=alt.Theta("Revenue:Q"), 
-                                color=alt.Color(f"{col_key}:N", 
-                                              scale=alt.Scale(scheme='tableau20'), 
-                                              legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=240, columns=2)),
+                                color=alt.Color(f"{col_key}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=240, columns=2)),
                                 tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
                             ).properties(height=450, width="container")
-                            
                             st.altair_chart(chart, use_container_width=True)
-                            
-                            grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
-                            grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
-                            render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
-                            
                             grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                             grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
                             render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
