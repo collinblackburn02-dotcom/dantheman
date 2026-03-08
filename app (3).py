@@ -25,7 +25,7 @@ STATE_TO_REGION = {
     'AK':'West','AZ':'West','CA':'West','CO':'West','HI':'West','ID':'West','MT':'West','NM':'West','NV':'West','OR':'West','UT':'West','WA':'West','WY':'West'
 }
 
-st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="wide") # 🚨 Wide layout for 2-col
+st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="wide")
 
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "df_icp" not in st.session_state: st.session_state.df_icp = None
@@ -51,7 +51,6 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# BUCKETING
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -170,9 +169,8 @@ elif st.session_state.app_state == "dashboard":
         ("Geographic Region", "region")
     ]
 
-    # 🚨 DUAL-COLUMN RENDERER 🚨
     for i in range(0, len(configs), 2):
-        row_cols = st.columns(2) # Create 2 variables per row
+        row_cols = st.columns(2)
         
         for j in range(2):
             if i + j < len(configs):
@@ -191,11 +189,11 @@ elif st.session_state.app_state == "dashboard":
                                 color=alt.Color(f"{col_key}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", labelFontSize=10)),
                                 tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
                             ).properties(height=300)
-                            
                             st.altair_chart(chart, use_container_width=True)
                             
                             grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
+                            # 🚨 THE KEY FIX: Rename the category column to match the header label dynamically
                             grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
                             
-                            # Compact table for 2-col view
-                            render_premium_table(grp[['label', 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
+                            # Render table using the actual new label
+                            render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
