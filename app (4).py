@@ -7,13 +7,9 @@ PITCH_COMPANY_NAME = "LeadNavigator"
 PITCH_BRAND_COLOR = "#B3845C" 
 
 AWS_COLUMN_MAPPER = {
-    "GENDER": "gender",
-    "MARRIED": "marital_status",
-    "AGE_RANGE": "age",
-    "INCOME_RANGE": "income",
-    "PERSONAL_STATE": "state_raw",
-    "PERSONAL_ZIP": "zip_code", 
-    "NET_WORTH": "net_worth",
+    "GENDER": "gender", "MARRIED": "marital_status", "AGE_RANGE": "age",
+    "INCOME_RANGE": "income", "PERSONAL_STATE": "state_raw",
+    "PERSONAL_ZIP": "zip_code", "NET_WORTH": "net_worth",
     "SKIPTRACE_CREDIT_RATING": "credit_rating"
 }
 
@@ -33,20 +29,13 @@ def apply_custom_theme(primary_color):
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
-            
-            /* Hide Sidebar */
             [data-testid="stSidebar"], [data-testid="collapsedControl"] {{ display: none !important; }}
-
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
-            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
-            
-            /* Clean Delta Labels (No Arrows) */
             [data-testid="stMetricDelta"] svg {{ display: none !important; }}
             [data-testid="stMetricDelta"] div {{ margin-left: 0 !important; }}
-            
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; margin-bottom: 2rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -86,7 +75,7 @@ def load_master_graph():
     except Exception as e:
         st.error(f"🚨 Connection Issue: {e}"); st.stop()
 
-# ================ 3. DASHBOARD FLOW =================
+# ================ 3. APP FLOW =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 
 if st.session_state.app_state == "onboarding":
@@ -97,92 +86,79 @@ if st.session_state.app_state == "onboarding":
         if uploaded_file:
             df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
             df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
-            
             with st.spinner("Identifying Your Customer Insights..."):
                 df_master = load_master_graph()
                 df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.strip()
                 df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
-                
-                # Pre-clean Revenue
                 df_joined['revenue_raw'] = pd.to_numeric(df_joined['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
                 
-                # Pre-calculate Summary
-                total_rev = df_joined['revenue_raw'].sum()
+                # 🚨 PRE-CALCULATE EVERYTHING NOW
+                all_views = {}
                 summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
+                total_rev_all = df_joined['revenue_raw'].sum()
                 top_perf = {}
+
                 for label, col_key in summary_vars:
                     temp = df_joined[~df_joined[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
                     if not temp.empty:
+                        # Summary Data
                         rs = temp.groupby(col_key)['revenue_raw'].sum()
-                        top_perf[label] = (rs.idxmax(), (rs.max()/total_rev*100))
-                
+                        top_perf[label] = (rs.idxmax(), (rs.max()/total_rev_all*100))
+                        # Table Data
+                        grp = temp.groupby(col_key).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+                        grp['% of Buyers'] = (grp['Purchasers'] / grp['Purchasers'].sum()) * 100
+                        grp['Rev / Purchaser'] = (grp['Revenue'] / grp['Purchasers'])
+                        final_v = grp.rename(columns={col_key: label.upper()}).sort_values('Revenue', ascending=False)
+                        if label == "Zip Code": final_v = final_v.head(50)
+                        
+                        # Store pre-styled HTML
+                        all_views[label] = final_v.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Revenue', '% of Buyers'], cmap=custom_light_green).hide(axis="index").to_html()
+
+                st.session_state.all_precalculated_html = all_views
                 st.session_state.top_performers = top_perf
-                st.session_state.df_icp = df_joined
+                st.session_state.total_profiles = df_joined['Order ID'].nunique()
+                st.session_state.total_revenue = total_rev_all
                 st.session_state.app_state = "dashboard"
                 st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    # Selection Controls
-    c1, _ = st.columns([1, 5])
-    if c1.button("🔄 New Analysis"): 
-        st.session_state.app_state = "onboarding"
-        st.rerun()
+    if st.button("🔄 New Analysis"): 
+        st.session_state.app_state = "onboarding"; st.rerun()
 
-    df_p = st.session_state.df_icp
-    
-    # 1. MACRO METRICS
+    # 1. MACRO METRICS (Pre-calculated)
     m1, m2 = st.columns(2)
-    m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
-    m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
+    m1.metric("Resolved Profiles", f"{st.session_state.total_profiles:,.0f}")
+    m2.metric("Attributed Sales", f"${st.session_state.total_revenue:,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. TOP PERFORMING DEMOGRAPHICS
+    # 2. TOP PERFORMING DEMOGRAPHICS (Pre-calculated)
     st.markdown("### 🏆 Top Performing Demographics")
     summary_cols = st.columns(len(st.session_state.top_performers))
     for i, (label, data) in enumerate(st.session_state.top_performers.items()):
         summary_cols[i].metric(label, data[0], f"{data[1]:.1f}% of Revenue")
-
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # 3. SINGLE VARIABLE DEEP DIVE
+    # 3. DEEP DIVE SELECTION
     st.markdown("### 🔍 Single Variable Deep Dive")
-    configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
     if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
     
-    var_cols = st.columns(len(configs))
-    for i, (label, col_name) in enumerate(configs):
+    # 🚨 Variable Buttons
+    v_labels = ["Gender", "Age", "Location", "Marital Status", "Credit Rating"]
+    var_cols = st.columns(len(v_labels))
+    for i, label in enumerate(v_labels):
         if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_var == label else "secondary", use_container_width=True):
-            st.session_state.active_var = label
-            st.rerun()
+            st.session_state.active_var = label; st.rerun()
 
+    lookup_key = st.session_state.active_var
     if st.session_state.active_var == "Location":
         st.markdown("<br>", unsafe_allow_html=True)
         l1, l2, l3, _ = st.columns([1, 1, 1, 5])
         if l1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
         if l2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
         if l3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
-        loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
-        active_col = loc_map[st.session_state.active_loc_level]
-        display_label = st.session_state.active_loc_level
-    else:
-        active_col = dict(configs)[st.session_state.active_var]
-        display_label = st.session_state.active_var
+        lookup_key = st.session_state.active_loc_level
 
-    # 4. PROCESSING & PURE TABLE (FAST RENDER)
-    if active_col in df_p.columns:
-        df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
-        df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
-        
-        if not df_p_grp.empty:
-            df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
-            df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
-            disp_name = display_label.upper()
-            
-            # Cap rows for browser performance
-            display_df = df_p_grp.rename(columns={active_col: disp_name}).sort_values('Revenue', ascending=False)
-            if display_label == "Zip Code": display_df = display_df.head(100)
-            
-            # Premium Table Rendering
-            styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Revenue', '% of Buyers'], cmap=custom_light_green)
-            st.markdown(f'<div class="premium-table-container">{styler.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
+    # 🚨 INSTANT RENDER: Grabbing pre-calculated HTML
+    if lookup_key in st.session_state.all_precalculated_html:
+        st.markdown(f'<div class="premium-table-container">{st.session_state.all_precalculated_html[lookup_key]}</div>', unsafe_allow_html=True)
