@@ -27,20 +27,21 @@ STATE_TO_REGION = {
 
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Audience Engine", page_icon="🧬", layout="wide")
 
-def apply_custom_theme(primary_color, is_pres_mode):
-    hide_style = """ [data-testid="stSidebar"] { display: none; } [data-testid="stHeader"] { display: none; } .block-container { padding-top: 2rem !important; } """ if is_pres_mode else ""
+def apply_custom_theme(primary_color):
     st.markdown(f"""
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
+            
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
+            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
             
-            /* 🚨 Restore Green Delta Text and Hide Arrows */
+            /* Green Delta Text (Share of Revenue) and Hide Arrows */
             [data-testid="stMetricDelta"] {{ color: #09AB3B !important; }}
             [data-testid="stMetricDelta"] svg {{ display: none; }} 
             
@@ -49,12 +50,10 @@ def apply_custom_theme(primary_color, is_pres_mode):
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
             .premium-table-container td {{ text-align: center !important; padding: 12px !important; border-bottom: 1px solid #F0EAD6 !important; font-size: 0.85rem !important; }}
             .premium-table-container td:first-child {{ font-weight: 700 !important; }}
-            {hide_style}
         </style>
     """, unsafe_allow_html=True)
 
-if "pres_mode" not in st.session_state: st.session_state.pres_mode = False
-apply_custom_theme(PITCH_BRAND_COLOR, st.session_state.pres_mode)
+apply_custom_theme(PITCH_BRAND_COLOR)
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 
 def render_premium_table(styler_obj):
@@ -119,30 +118,30 @@ elif st.session_state.app_state == "dashboard":
         st.title("🔒 Security")
         pwd = st.text_input("Password", type="password")
         is_unlocked = (pwd == DEMO_PASSWORD)
-        if is_unlocked:
-            st.success("Full Access Granted")
-            st.session_state.pres_mode = st.toggle("🎥 Presentation Mode", value=st.session_state.pres_mode)
-        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.session_state.pres_mode = False; st.rerun()
+        if is_unlocked: st.success("Full Access Granted")
+        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.rerun()
 
     full_df = st.session_state.df_icp
     df_p = full_df if is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # 🚨 1. MACRO METRICS
+    # 1. MACRO METRICS
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 🚨 2. TOP PERFORMING DEMOGRAPHICS (Renamed and Green Deltas)
+    # 2. TOP PERFORMING DEMOGRAPHICS (Full Leaderboard)
     st.markdown("### 🏆 Top Performing Demographics")
     
     total_revenue_overall = df_p['revenue_raw'].sum()
     
-    # Expanded list for the summary
+    # Complete list for the summary blocks
     summary_vars = [
         ("Gender", "gender"), 
         ("Age", "age"), 
+        ("Marital Status", "marital_status"),
+        ("Region", "region"),
         ("State", "state_raw"), 
         ("Zip Code", "zip_code"),
         ("Credit Rating", "credit_rating")
@@ -157,14 +156,13 @@ elif st.session_state.app_state == "dashboard":
                 rev_series = temp.groupby(col_key)['revenue_raw'].sum()
                 winner = rev_series.idxmax()
                 rev_val = rev_series.max()
-                rev_pct = (rev_val / total_revenue_overall) * 100 
+                rev_pct = (rev_val / total_revenue_overall) * 100 if total_revenue_overall > 0 else 0
                 
-                # Render the metric
                 summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # 🚨 3. SINGLE VARIABLE DEEP DIVE
+    # 3. SINGLE VARIABLE DEEP DIVE
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     
@@ -198,10 +196,6 @@ elif st.session_state.app_state == "dashboard":
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
-            
-            display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
-            styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
-            render_premium_table(styler)
             
             display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
