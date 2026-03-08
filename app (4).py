@@ -38,7 +38,7 @@ def apply_custom_theme(primary_color, is_pres_mode):
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
-            [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; }}
+            [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -74,12 +74,10 @@ def load_master_graph():
         df = df.rename(columns=AWS_COLUMN_MAPPER)
         df.columns = [c.lower() for c in df.columns]
         
-        # Identity Mapping
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
-        # 🚨 ROBUST ZIP CLEANING
         if 'zip_code' in df.columns:
             df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
             df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
@@ -121,9 +119,32 @@ elif st.session_state.app_state == "dashboard":
             st.session_state.pres_mode = st.toggle("🎥 Presentation Mode", value=st.session_state.pres_mode)
         if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.session_state.pres_mode = False; st.rerun()
 
-    if st.session_state.pres_mode:
-        if st.button("Exit Presentation Mode"): st.session_state.pres_mode = False; st.rerun()
+    full_df = st.session_state.df_icp
+    df_p = full_df if is_unlocked else full_df.head(100).copy()
+    df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+    
+    # 🚨 1. MACRO METRICS
+    m1, m2 = st.columns(2)
+    m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
+    m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
+    st.markdown("<br>", unsafe_allow_html=True)
 
+    # 🚨 2. EXECUTIVE SUMMARY: TOP PERFORMERS
+    st.markdown("### 🏆 Executive Summary: Top Demographic Performers")
+    summary_cols = st.columns(5)
+    core_vars = [("Gender", "gender"), ("Age", "age"), ("Region", "region"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
+    
+    for idx, (label, col_key) in enumerate(core_vars):
+        if col_key in df_p.columns:
+            temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
+            if not temp.empty:
+                winner = temp.groupby(col_key)['revenue_raw'].sum().idxmax()
+                rev_val = temp.groupby(col_key)['revenue_raw'].sum().max()
+                summary_cols[idx].metric(label, winner, f"${rev_val:,.0f} Total")
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # 🚨 3. SINGLE VARIABLE DEEP DIVE
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     
@@ -150,18 +171,8 @@ elif st.session_state.app_state == "dashboard":
         active_col = dict(configs)[st.session_state.active_var]
         display_label = st.session_state.active_var
 
-    full_df = st.session_state.df_icp
-    df_p = full_df if is_unlocked else full_df.head(100).copy()
-    df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
-    
-    m1, m2 = st.columns(2)
-    m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
-    m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
-
     if active_col in df_p.columns:
-        # 🚨 FILTER NULLS
         df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
-        
         df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
         
         if not df_p_grp.empty:
