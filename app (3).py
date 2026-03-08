@@ -67,19 +67,27 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# 🚨 CORRECTED BUCKETING LOGIC
+# 🚨 EXACT STRING MAPPING LOGIC
 def bucket_income(val):
-    v = str(val).lower()
-    if '250,000' in v or '500,000' in v: return "High ($250k+)"
-    if any(x in v for x in ['125,000', '150,000', '175,000', '200,000']): return "Med-High ($125k-$249k)"
-    if any(x in v for x in ['50,000', '75,000', '100,000']): return "Medium ($50k-$124k)"
+    v = str(val).strip()
+    high = ['$250,000 - $499,999', '$500,000+']
+    med_high = ['$125,000 - $149,999', '$150,000 - $174,999', '$175,000 - $199,999', '$200,000 - $249,999']
+    medium = ['$50,000 - $74,999', '$75,000 - $99,999', '$100,000 - $124,999']
+    
+    if v in high: return "High ($250k+)"
+    if v in med_high: return "Med-High ($125k-$249k)"
+    if v in medium: return "Medium ($50k-$124k)"
     return "Low (Under $50k)"
 
 def bucket_nw(val):
-    v = str(val).lower()
-    if any(x in v for x in ['1,000,000', '2,000,000', '5,000,000']): return "High ($1M+)"
-    if any(x in v for x in ['250,000', '500,000']): return "Med-High ($250k-$999k)"
-    if any(x in v for x in ['50,000', '100,000']): return "Medium ($50k-$249k)"
+    v = str(val).strip()
+    high = ['$1,000,000 - $1,999,999', '$2,000,000 - $4,999,999', '$5,000,000+']
+    med_high = ['$250,000 - $499,999', '$500,000 - $999,999']
+    medium = ['$50,000 - $99,999', '$100,000 - $249,999']
+    
+    if v in high: return "High ($1M+)"
+    if v in med_high: return "Med-High ($250k-$999k)"
+    if v in medium: return "Medium ($50k-$249k)"
     return "Low (Under $50k)"
 
 def bucket_credit(val):
@@ -117,7 +125,7 @@ def load_master_graph():
         if 'state_raw' in df.columns: 
             df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Other')
         
-        # Apply corrected bucketing
+        # Apply Exact Bucketing
         if 'income' in df.columns: df['income'] = df['income'].apply(bucket_income)
         if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].apply(bucket_nw)
         if 'credit_rating' in df.columns: df['credit_rating'] = df['credit_rating'].apply(bucket_credit)
@@ -216,6 +224,10 @@ elif st.session_state.app_state == "dashboard":
                             ).properties(height=450, width="container")
                             
                             st.altair_chart(chart, use_container_width=True)
+                            
+                            grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
+                            grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
+                            render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
                             
                             grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                             grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
