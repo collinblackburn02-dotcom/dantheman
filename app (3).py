@@ -50,7 +50,7 @@ def render_premium_table(styler_obj):
 configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region", "region"), ("Net Worth", "net_worth"), ("Children", "children"), ("Marital Status", "marital_status"), ("Homeowner", "homeowner"), ("Credit Rating", "credit_rating")]
 
 # ================ 2. LIVE AWS CONNECTION =================
-@st.cache_data(ttl=3600) # Caches the data for 1 hour so it loads instantly on multiple uploads!
+@st.cache_data(ttl=3600) 
 def load_master_graph():
     """Reads your live master list directly from AWS S3."""
     
@@ -59,15 +59,11 @@ def load_master_graph():
         "secret": st.secrets["aws"]["secret_key"]
     }
     
-    # Exact S3 Path based on your bucket and file name
-    s3_file_path = "s3://leadnav-demo-data/visitors_raw - NEW Copy of Copy of CLEAN  - EnrichedRaw (1).csv"
+    # Updated to the clean file name!
+    s3_file_path = "s3://leadnav-demo-data/master_data.csv"
     
     # Read directly from AWS into memory
     df_master = pd.read_csv(s3_file_path, storage_options=aws_keys, low_memory=False)
-    
-    # Ensure the email column is perfectly standardized for matching
-    # NOTE: If your CSV uses "email_address" or "PERSONAL_EMAILS", rename it here:
-    # df_master = df_master.rename(columns={'PERSONAL_EMAILS': 'Email'})
     
     if 'Email' in df_master.columns:
         df_master['Email'] = df_master['Email'].astype(str).str.lower().str.strip()
