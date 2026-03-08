@@ -52,9 +52,8 @@ configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region"
 # ================ 2. LIVE AWS CONNECTION =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
-    """Reads your live master list directly from AWS S3."""
+    """Reads your live master list directly from AWS S3 and safely explodes multiple emails."""
     
-    # Explicitly pointing to Ohio!
     YOUR_AWS_REGION = "us-east-2" 
     
     aws_keys = {
@@ -66,19 +65,35 @@ def load_master_graph():
     s3_file_path = "s3://leadnav-demo-data/master_data.csv"
     
     try:
-        # Read directly from AWS into memory
         df_master = pd.read_csv(s3_file_path, storage_options=aws_keys, low_memory=False)
         
-        if 'Email' in df_master.columns:
-            df_master['Email'] = df_master['Email'].astype(str).str.lower().str.strip()
+        email_cols = [col for col in df_master.columns if 'email' in col.lower()]
+        
+        if email_cols:
+            df_master = df_master.rename(columns={email_cols[0]: 'Email'})
+            df_master['Email'] = df_master['Email'].astype(str).str.lower()
+            
+            # 1. Split commas
+            df_master['Email'] = df_master['Email'].str.split(',')
+            
+            # 2. Explode the lists into unique rows
+            df_master = df_master.explode('Email')
+            
+            # 3. Clean up any accidental spaces
+            df_master['Email'] = df_master['Email'].str.strip()
+            
+            # 4. THE SHIELD: Drop any duplicate emails to protect the revenue math!
+            df_master = df_master.drop_duplicates(subset=['Email'], keep='first')
+            
+        else:
+            st.error(f"⚠️ Could not find an email column in AWS! Available columns: {list(df_master.columns)}")
+            st.stop()
             
         return df_master
         
     except Exception as e:
-        # If anything goes wrong, this will print the REAL AWS error on your dashboard!
         st.error(f"🚨 **AWS Connection Error:** {str(e)}")
         st.stop()
-
 # ================ 3. STATE 1: ONBOARDING SCREEN =================
 if st.session_state.app_state == "onboarding":
     
