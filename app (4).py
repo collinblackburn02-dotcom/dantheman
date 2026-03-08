@@ -25,7 +25,7 @@ STATE_TO_REGION = {
     'AK':'West','AZ':'West','CA':'West','CO':'West','HI':'West','ID':'West','MT':'West','NM':'West','NV':'West','OR':'West','UT':'West','WA':'West','WY':'West'
 }
 
-st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Audience Engine", page_icon="🧬", layout="wide")
+st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Audience Engine", page_icon="🧬", layout="wide", initial_sidebar_state="collapsed")
 
 def apply_custom_theme(primary_color):
     st.markdown(f"""
@@ -34,12 +34,19 @@ def apply_custom_theme(primary_color):
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
+            
+            /* Hide the sidebar completely */
+            [data-testid="stSidebar"] {{ display: none; }}
+            [data-testid="collapsedControl"] {{ display: none; }}
+
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
+            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
             [data-testid="stMetricDelta"] {{ color: #09AB3B !important; }}
             [data-testid="stMetricDelta"] svg {{ display: none; }} 
+            
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -85,12 +92,11 @@ def load_master_graph():
         df = df.explode('email_match').reset_index(drop=True)
         return df.drop_duplicates(subset=['email_match']).reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 AWS Error: {e}"); st.stop()
+        st.error(f"🚨 AWS Connection Issue: {e}"); st.stop()
 
-# ================ 3. INITIALIZATION =================
+# ================ 3. DASHBOARD FLOW =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 
-# ================ 4. APP FLOW =================
 if st.session_state.app_state == "onboarding":
     st.markdown("<h1 style='text-align: center; font-size: 3rem; margin-top: 50px;'>🎯 Audience Engine</h1>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 2, 1])
@@ -99,21 +105,23 @@ if st.session_state.app_state == "onboarding":
         if uploaded_file:
             df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
             df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
-            with st.spinner("Executing LeadNavigator Resolution..."):
-                df_master = load_master_graph()
-                df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.strip()
-                df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
-                if not df_joined.empty:
-                    st.session_state.df_icp = df_joined
-                    st.session_state.app_state = "dashboard"
-                    st.rerun()
+            # Quietly load to avoid code block showing
+            df_master = load_master_graph()
+            df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.strip()
+            df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
+            if not df_joined.empty:
+                st.session_state.df_icp = df_joined
+                st.session_state.app_state = "dashboard"
+                st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    if st.sidebar.button("🔄 New Analysis"): 
+    # Selection Controls at the top
+    c1, _ = st.columns([1, 5])
+    if c1.button("🔄 New Analysis"): 
         st.session_state.app_state = "onboarding"
         st.rerun()
 
-    df_p = st.session_state.df_icp
+    df_p = st.session_state.df_icp.copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
     # 1. MACRO METRICS
@@ -125,23 +133,21 @@ elif st.session_state.app_state == "dashboard":
     # 2. TOP PERFORMING DEMOGRAPHICS
     st.markdown("### 🏆 Top Performing Demographics")
     total_rev = df_p['revenue_raw'].sum()
-    summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
+    summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code")]
     summary_cols = st.columns(len(summary_vars))
     for idx, (label, col_key) in enumerate(summary_vars):
-        if col_key in df_p.columns:
-            temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
-            if not temp.empty:
-                rev_series = temp.groupby(col_key)['revenue_raw'].sum()
-                winner = rev_series.idxmax()
-                rev_pct = (rev_series.max() / total_rev * 100) if total_rev > 0 else 0
-                summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
+        temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
+        if not temp.empty:
+            rev_series = temp.groupby(col_key)['revenue_raw'].sum()
+            winner = rev_series.idxmax()
+            rev_pct = (rev_series.max() / total_rev * 100) if total_rev > 0 else 0
+            summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # 3. SINGLE VARIABLE DEEP DIVE
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
-    
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
     if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
     
@@ -159,26 +165,40 @@ elif st.session_state.app_state == "dashboard":
         if l3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
         loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
         active_col = loc_map[st.session_state.active_loc_level]
-    else: active_col = dict(configs)[st.session_state.active_var]
+        display_label = st.session_state.active_loc_level
+    else:
+        active_col = dict(configs)[st.session_state.active_var]
+        display_label = st.session_state.active_var
 
+    # 4. PROCESSING & PRETTY CHART
     if active_col in df_p.columns:
         df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
         df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+        
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
-            disp_label = st.session_state.active_var.upper() if st.session_state.active_var != "Location" else st.session_state.active_loc_level.upper()
-            display_df = df_p_grp.rename(columns={active_col: disp_label}).sort_values('Revenue', ascending=False)
+            disp_name = display_label.upper()
+            display_df = df_p_grp.rename(columns={active_col: disp_name}).sort_values('Revenue', ascending=False)
             
-            # 🚨 SHADING MOVED TO REVENUE & % OF BUYERS
+            # Premium Table
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Revenue', '% of Buyers'], cmap=custom_light_green)
-            st.markdown(f'<div class="premium-table-container">{styler.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
+            render_premium_table(styler)
 
-            if st.session_state.active_var == "Location":
-                with st.expander(f"🗺️ View {st.session_state.active_loc_level} Revenue Analysis", expanded=True):
-                    chart = alt.Chart(display_df.head(20)).mark_bar().encode(
-                        x=alt.X(f'{disp_label}:N', sort='-y'), y='Revenue:Q',
-                        color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens')),
-                        tooltip=[disp_label, alt.Tooltip('Revenue:Q', format='$,.0f')]
-                    ).properties(height=400)
-                    st.altair_chart(chart, use_container_width=True)
+            # 🚨 THE "PRETTY" PITCH CHART
+            chart_expander_label = f"🗺️ {display_label} Revenue Concentration" if st.session_state.active_var == "Location" else f"📊 {display_label} Distribution Analysis"
+            with st.expander(chart_expander_label, expanded=True):
+                # Clean up data for chart
+                chart_df = display_df.head(15).copy()
+                
+                pretty_chart = alt.Chart(chart_df).mark_bar(
+                    cornerRadiusTopLeft=8, cornerRadiusTopRight=8, stroke="#E2D7C8", strokeWidth=0.5
+                ).encode(
+                    x=alt.X(f'{disp_name}:N', sort='-y', axis=alt.Axis(labelAngle=-45, title=None, labelFont='Outfit', labelFontSize=12)),
+                    y=alt.Y('Revenue:Q', axis=alt.Axis(format='$,.0f', grid=True, title="Total Revenue ($)", titleFont='Outfit')),
+                    # Match the table's green gradient
+                    color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
+                    tooltip=[disp_name, alt.Tooltip('Revenue:Q', format='$,.2f'), alt.Tooltip('Purchasers:Q')]
+                ).configure_view(strokeOpacity=0).properties(height=400)
+                
+                st.altair_chart(pretty_chart, use_container_width=True)
