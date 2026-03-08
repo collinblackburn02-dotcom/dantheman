@@ -25,6 +25,7 @@ STATE_TO_REGION = {
     'AK':'West','AZ':'West','CA':'West','CO':'West','HI':'West','ID':'West','MT':'West','NM':'West','NV':'West','OR':'West','UT':'West','WA':'West','WY':'West'
 }
 
+# 🚨 SET WIDE LAYOUT FOR 2-COLUMN VIEW
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="wide")
 
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
@@ -36,9 +37,31 @@ def apply_custom_theme(primary_color):
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
-            h1, h2, h3 {{ color: #2D2421 !important; font-weight: 700 !important; }}
-            [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; }}
-            .premium-table-container {{ margin-bottom: 2rem; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; }}
+            
+            /* Center the main headers */
+            h1, h2, h3 {{ 
+                color: #2D2421 !important; 
+                font-weight: 700 !important; 
+                text-align: center !important; 
+                margin-bottom: 1.5rem !important;
+            }}
+            
+            [data-testid="stMetric"] {{ 
+                background-color: #FFFFFF; 
+                border: 1px solid #E2D7C8; 
+                border-radius: 12px; 
+                padding: 20px; 
+                text-align: center;
+            }}
+            
+            .premium-table-container {{ 
+                margin: 0 auto 2rem auto; 
+                border-radius: 12px; 
+                border: 1px solid #E2D7C8; 
+                background: #FFFFFF; 
+                overflow: hidden; 
+                max-width: 95%;
+            }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; padding: 10px; text-transform: uppercase; font-size: 0.7rem; }}
             .premium-table-container td {{ text-align: center !important; padding: 8px; border-bottom: 1px solid #F0EAD6; font-size: 0.85rem; }}
@@ -51,6 +74,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
+# BUCKETING
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -118,21 +142,24 @@ def load_master_graph():
 
 # ================ 3. ONBOARDING =================
 if st.session_state.app_state == "onboarding":
-    st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
-    if uploaded_file:
-        df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
-        df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
-        
-        with st.spinner("Executing LeadNavigator Identity Resolution..."):
-            df_master = load_master_graph()
-            df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
-            df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
+    # Simple centered landing
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+        st.markdown(f"<h1 style='font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
+        uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
+        if uploaded_file:
+            df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
+            df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
             
-            if not df_joined.empty:
-                st.session_state.df_icp = df_joined
-                st.session_state.app_state = "dashboard"
-                st.rerun()
+            with st.spinner("Executing LeadNavigator Identity Resolution..."):
+                df_master = load_master_graph()
+                df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
+                df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
+                
+                if not df_joined.empty:
+                    st.session_state.df_icp = df_joined
+                    st.session_state.app_state = "dashboard"
+                    st.rerun()
 
 # ================ 4. DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
@@ -145,6 +172,7 @@ elif st.session_state.app_state == "dashboard":
         else:
             st.warning("Preview Mode: First 100 Matches")
 
+    # Layout spacing
     st.markdown(f"## 🧬 Identity Match Result {'(Unlocked)' if is_unlocked else '(Restricted)'}")
     if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
     
@@ -157,9 +185,12 @@ elif st.session_state.app_state == "dashboard":
 
     df['revenue_raw'] = pd.to_numeric(df['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
-    m1, m2 = st.columns(2)
-    m1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
-    with m2: st.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
+    # Clean KPI Display
+    _, kpi_col, _ = st.columns([1, 4, 1])
+    with kpi_col:
+        m1, m2 = st.columns(2)
+        m1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
+        m2.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
     configs = [
@@ -169,6 +200,7 @@ elif st.session_state.app_state == "dashboard":
         ("Geographic Region", "region")
     ]
 
+    # 🚨 DESIGN OVERHAUL: SIDE-BY-SIDE RENDERER
     for i in range(0, len(configs), 2):
         row_cols = st.columns(2)
         
@@ -182,18 +214,19 @@ elif st.session_state.app_state == "dashboard":
                         
                         if not chart_data.empty:
                             grp = chart_data.groupby(col_key).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
-                            st.markdown(f"<h3 style='text-align: center;'>{label}</h3>", unsafe_allow_html=True)
                             
-                            chart = alt.Chart(grp).mark_arc(innerRadius=60, stroke="#fff").encode(
-                                theta="Revenue:Q", 
-                                color=alt.Color(f"{col_key}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", labelFontSize=10)),
+                            # 🚨 ALTAIR DESIGN FIX: Centered Title + Large Legend
+                            chart = alt.Chart(grp).mark_arc(innerRadius=70, stroke="#fff").encode(
+                                theta=alt.Theta("Revenue:Q"), 
+                                color=alt.Color(f"{col_key}:N", 
+                                              scale=alt.Scale(scheme='tableau20'), 
+                                              legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=200, columns=2)),
                                 tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
-                            ).properties(height=300)
+                            ).properties(title=alt.TitleParams(text=label, fontSize=24, anchor='middle'), height=450, width="container")
+                            
                             st.altair_chart(chart, use_container_width=True)
                             
+                            # Refined Table
                             grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
-                            # 🚨 THE KEY FIX: Rename the category column to match the header label dynamically
                             grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
-                            
-                            # Render table using the actual new label
                             render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
