@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.colors as mcolors
+import altair as alt
 
 # ================ 1. CONFIGURATION & THEME =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
@@ -34,17 +35,12 @@ def apply_custom_theme(primary_color):
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
-            
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
-            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
-            
-            /* Green Delta Text (Share of Revenue) and Hide Arrows */
             [data-testid="stMetricDelta"] {{ color: #09AB3B !important; }}
             [data-testid="stMetricDelta"] svg {{ display: none; }} 
-            
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -81,7 +77,6 @@ def load_master_graph():
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
-        
         if 'zip_code' in df.columns:
             df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
             df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
@@ -131,33 +126,18 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. TOP PERFORMING DEMOGRAPHICS (Full Leaderboard)
+    # 2. TOP PERFORMING DEMOGRAPHICS
     st.markdown("### 🏆 Top Performing Demographics")
-    
     total_revenue_overall = df_p['revenue_raw'].sum()
-    
-    # Complete list for the summary blocks
-    summary_vars = [
-        ("Gender", "gender"), 
-        ("Age", "age"), 
-        ("Marital Status", "marital_status"),
-        ("Region", "region"),
-        ("State", "state_raw"), 
-        ("Zip Code", "zip_code"),
-        ("Credit Rating", "credit_rating")
-    ]
-    
+    summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
     summary_cols = st.columns(len(summary_vars))
-
     for idx, (label, col_key) in enumerate(summary_vars):
         if col_key in df_p.columns:
             temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
             if not temp.empty:
                 rev_series = temp.groupby(col_key)['revenue_raw'].sum()
                 winner = rev_series.idxmax()
-                rev_val = rev_series.max()
-                rev_pct = (rev_val / total_revenue_overall) * 100 if total_revenue_overall > 0 else 0
-                
+                rev_pct = (rev_series.max() / total_revenue_overall) * 100 if total_revenue_overall > 0 else 0
                 summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
 
     st.markdown("<hr>", unsafe_allow_html=True)
@@ -165,7 +145,6 @@ elif st.session_state.app_state == "dashboard":
     # 3. SINGLE VARIABLE DEEP DIVE
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
-    
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
     if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
     
@@ -177,11 +156,10 @@ elif st.session_state.app_state == "dashboard":
 
     if st.session_state.active_var == "Location":
         st.markdown("<br>", unsafe_allow_html=True)
-        l_col1, l_col2, l_col3, _ = st.columns([1, 1, 1, 5])
-        if l_col1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
-        if l_col2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
-        if l_col3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
-        
+        l1, l2, l3, _ = st.columns([1, 1, 1, 5])
+        if l1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
+        if l2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
+        if l3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
         loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
         active_col = loc_map[st.session_state.active_loc_level]
         display_label = st.session_state.active_loc_level
@@ -196,7 +174,23 @@ elif st.session_state.app_state == "dashboard":
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
-            
             display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
+            
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
             render_premium_table(styler)
+
+            # 🚨 DYNAMIC REVENUE HEATMAP
+            if st.session_state.active_var == "Location":
+                with st.expander(f"🗺️ View {display_label} Revenue Analysis", expanded=True):
+                    # Sort data for clean chart
+                    chart_df = display_df.head(20) if st.session_state.active_loc_level == "Zip Code" else display_df
+                    chart_label = display_label.upper()
+                    
+                    heat_chart = alt.Chart(chart_df).mark_bar().encode(
+                        y=alt.Y(f'{chart_label}:N', sort='-x', title=None),
+                        x=alt.X('Revenue:Q', title="Attributed Sales ($)"),
+                        color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
+                        tooltip=[chart_label, alt.Tooltip('Revenue:Q', format='$,.0f')]
+                    ).properties(height=max(200, len(chart_df)*20), title=f"Top {display_label} Performers by Revenue")
+                    
+                    st.altair_chart(heat_chart, use_container_width=True)
