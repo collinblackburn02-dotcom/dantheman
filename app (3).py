@@ -85,6 +85,10 @@ def load_master_graph():
     try:
         df = pd.read_csv("s3://leadnav-demo-data/master_data.csv", storage_options=aws_keys, low_memory=False)
         df.columns = [c.lower() for c in df.columns]
+        
+        # 1. First Index Reset
+        df = df.reset_index(drop=True)
+        
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
         
@@ -93,10 +97,19 @@ def load_master_graph():
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
         
+        # Email Explosion logic
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
-        df['Email'] = df['Email'].astype(str).str.lower().str.split(',').explode().str.strip()
-        return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
+        df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
+        
+        # 2. Explode creates duplicate index labels
+        df = df.explode('Email')
+        df['Email'] = df['Email'].str.strip()
+        
+        # 3. CRITICAL: Reset Index after explosion to kill the 'Duplicate Labels' error
+        df = df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
+        
+        return df
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
 
@@ -110,7 +123,10 @@ if st.session_state.app_state == "onboarding":
         with st.spinner("Analyzing Identity Graph..."):
             df_master = load_master_graph()
             df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
-            df_joined = pd.merge(df_orders, df_master, on='Email', how='inner')
+            
+            # Merge logic
+            df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
+            
             if not df_joined.empty:
                 st.session_state.df_icp = df_joined
                 st.session_state.app_state = "dashboard"
@@ -121,7 +137,6 @@ elif st.session_state.app_state == "dashboard":
     if st.button("← New Upload"): st.session_state.app_state = "onboarding"; st.rerun()
     
     df = st.session_state.df_icp
-    # Ensure Total is numeric immediately
     df['Total'] = pd.to_numeric(df['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
     c1, c2 = st.columns(2)
@@ -139,7 +154,7 @@ elif st.session_state.app_state == "dashboard":
             grp = df_plot.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
-                # --- FIX: FORCE REVENUE TO NUMERIC FOR MATH ---
+                # Force numeric before percentage math
                 grp['Revenue'] = pd.to_numeric(grp['Revenue'], errors='coerce').fillna(0)
                 
                 st.markdown(f"## {label}")
@@ -156,7 +171,6 @@ elif st.session_state.app_state == "dashboard":
                 ).properties(height=500)
                 st.altair_chart(chart, use_container_width=True)
                 
-                # Math for table
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
