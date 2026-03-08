@@ -86,7 +86,6 @@ def load_master_graph():
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             temp_df.columns = [c.upper().strip() for c in temp_df.columns]
             
-            # Use PERSONAL_EMAILS specifically
             if 'PERSONAL_EMAILS' in temp_df.columns:
                 temp_df = temp_df.rename(columns={'PERSONAL_EMAILS': 'email_match'})
             else:
@@ -130,7 +129,7 @@ if st.session_state.app_state == "onboarding":
             df_master = load_master_graph()
             df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
             
-            # Match ENTIRE file first to maximize matches
+            # Match the FULL file first
             df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
             
             if not df_joined.empty:
@@ -154,9 +153,14 @@ elif st.session_state.app_state == "dashboard":
     st.markdown(f"## 🧬 Identity Match Result {'(Unlocked)' if is_unlocked else '(Restricted)'}")
     if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
     
-    # Clip only after matching is done
+    # 🚨 UPDATED CLIPPING LOGIC: Clip by Unique Order IDs 🚨
     full_df = st.session_state.df_icp
-    df = full_df.head(100).copy() if not is_unlocked else full_df.copy()
+    if not is_unlocked:
+        # Get the IDs of the first 100 unique buyers
+        top_100_ids = full_df['Order ID'].unique()[:100]
+        df = full_df[full_df['Order ID'].isin(top_100_ids)].copy()
+    else:
+        df = full_df.copy()
 
     df['revenue_raw'] = pd.to_numeric(df['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
