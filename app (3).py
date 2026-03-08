@@ -98,7 +98,8 @@ def load_master_graph():
     try:
         for f in files:
             path = f"s3://leadnav-demo-data/{f}"
-            temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False)
+            # 🚨 FIX: Added encoding='cp1252' to handle special characters (Registered symbols, quotes, etc)
+            temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='cp1252')
             dataframes.append(temp_df)
             
         df = pd.concat(dataframes, axis=0, ignore_index=True)
@@ -138,7 +139,8 @@ if st.session_state.app_state == "onboarding":
     st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
     uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
     if uploaded_file:
-        df_orders = pd.read_csv(uploaded_file)
+        # Added encoding here too just in case the uploaded file is messy
+        df_orders = pd.read_csv(uploaded_file, encoding='cp1252')
         df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date'})
         with st.spinner("Analyzing Combined Identity Graph..."):
             df_master = load_master_graph()
