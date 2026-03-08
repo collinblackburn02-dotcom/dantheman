@@ -35,9 +35,8 @@ def apply_custom_theme(primary_color):
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
             
-            /* 🚨 Force hide sidebar completely */
-            [data-testid="stSidebar"] {{ display: none !important; }}
-            [data-testid="collapsedControl"] {{ display: none !important; }}
+            /* Hide the sidebar and collapse controls completely */
+            [data-testid="stSidebar"], [data-testid="collapsedControl"] {{ display: none !important; }}
 
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
@@ -45,6 +44,10 @@ def apply_custom_theme(primary_color):
             
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
             
+            /* 🚨 Remove up/down arrows from all metrics while keeping green labels */
+            [data-testid="stMetricDelta"] svg {{ display: none !important; }}
+            [data-testid="stMetricDelta"] div {{ margin-left: 0 !important; }}
+
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; margin-bottom: 2rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -60,7 +63,6 @@ def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
 # ================ 2. DATA ENGINE =================
-# 🚨 Added show_spinner=False to hide the function name
 @st.cache_data(ttl=3600, show_spinner=False) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -103,7 +105,6 @@ if st.session_state.app_state == "onboarding":
             df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
             df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
             
-            # 🚨 Branded Pitch Loading Message
             with st.spinner("Identifying Your Customer Insights..."):
                 df_master = load_master_graph()
                 df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.strip()
@@ -114,7 +115,6 @@ if st.session_state.app_state == "onboarding":
                     st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    # 🚨 New Analysis button moved to main dashboard area
     c1, _ = st.columns([1, 5])
     if c1.button("🔄 New Analysis"): 
         st.session_state.app_state = "onboarding"
@@ -132,7 +132,10 @@ elif st.session_state.app_state == "dashboard":
     # 2. TOP PERFORMING DEMOGRAPHICS
     st.markdown("### 🏆 Top Performing Demographics")
     total_rev = df_p['revenue_raw'].sum()
-    summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
+    summary_vars = [
+        ("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), 
+        ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")
+    ]
     summary_cols = st.columns(len(summary_vars))
     for idx, (label, col_key) in enumerate(summary_vars):
         if col_key in df_p.columns:
