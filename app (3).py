@@ -53,6 +53,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
+# BUCKETING LOGIC
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -74,7 +75,7 @@ def bucket_credit(val):
     if v in ['F', 'G']: return "Low (F, G)"
     return "Unknown"
 
-# ================ 2. LIVE AWS CONNECTION (MULTI-FILE) =================
+# ================ 2. LIVE AWS CONNECTION =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -84,36 +85,44 @@ def load_master_graph():
     try:
         for f in files:
             path = f"s3://leadnav-demo-data/{f}"
-            # 🚨 FIX: Added 'on_bad_lines' to ignore rows with too many commas
+            # 🚨 latin1 is more permissive for messy CSVs
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             dataframes.append(temp_df)
             
         df = pd.concat(dataframes, axis=0, ignore_index=True)
-        df.columns = [c.lower() for c in df.columns]
+        df.columns = [c.upper() for c in df.columns] # Use Upper for mapping safety
         df = df.reset_index(drop=True)
         
-        rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
-        df = df.rename(columns=rename_dict)
+        # Mapping Logic
+        df = df.rename(columns=AWS_COLUMN_MAPPER)
         
-        if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
-        if 'income_raw' in df.columns: df['income'] = df['income_raw'].apply(bucket_income)
-        if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
-        if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
+        if 'STATE_RAW' in df.columns: df['region'] = df['STATE_RAW'].str.strip().str.upper().map(STATE_TO_REGION)
+        if 'INCOME_RAW' in df.columns: df['income'] = df['INCOME_RAW'].apply(bucket_income)
+        if 'NET_WORTH_RAW' in df.columns: df['net_worth'] = df['NET_WORTH_RAW'].apply(bucket_nw)
+        if 'CREDIT_RAW' in df.columns: df['credit_rating'] = df['CREDIT_RAW'].apply(bucket_credit)
         
         if 'gender' in df.columns:
             df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns:
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
-        email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
-        df = df.rename(columns={email_col: 'Email'})
-        df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
+        # 🚨 SUPER-MATCH LOGIC: Prioritize PERSONAL_EMAILS over hashes
+        target_email_col = 'PERSONAL_EMAILS' if 'PERSONAL_EMAILS' in df.columns else None
+        if not target_email_col:
+            # Fallback to anything with "EMAIL" that ISN'T a hash
+            potential_cols = [c for c in df.columns if 'EMAIL' in c and 'SHA' not in c and 'HEM' not in c]
+            target_email_col = potential_cols[0] if potential_cols else df.columns[0]
+        
+        st.sidebar.write(f"🔍 Identity Graph matching on AWS column: **{target_email_col}**")
+        
+        df = df.rename(columns={target_email_col: 'Email'})
+        df['Email'] = df['Email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('Email').reset_index(drop=True)
         df['Email'] = df['Email'].str.strip()
         
         return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 AWS Combine Error: {e}"); st.stop()
+        st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
 
 # ================ 3. STATE 1: ONBOARDING =================
 if st.session_state.app_state == "onboarding":
@@ -122,14 +131,25 @@ if st.session_state.app_state == "onboarding":
     if uploaded_file:
         df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
         df_orders = df_orders.rename(columns={'Name': 'Order ID', 'Created at': 'Date'})
-        with st.spinner("Resolving Combined Identity Graph..."):
+        
+        with st.spinner("Executing Identity Resolution..."):
             df_master = load_master_graph()
-            df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
+            
+            # Clean order emails identically to the master list
+            df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
+            
+            # Diagnostic count
+            unique_orders = df_orders['Email'].nunique()
+            st.sidebar.write(f"📊 Unique Emails Uploaded: {unique_orders}")
+            
             df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
+            
             if not df_joined.empty:
                 st.session_state.df_icp = df_joined
                 st.session_state.app_state = "dashboard"
                 st.rerun()
+            else:
+                st.error("⚠️ Zero Matches. Check sidebar diagnostics for column names.")
 
 # ================ 4. STATE 2: DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
@@ -156,18 +176,10 @@ elif st.session_state.app_state == "dashboard":
             
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
-                if col == "region":
-                    with st.expander("📍 View Regional Identity Map"):
-                        st.write("**Northeast:** CT, MA, ME, NH, NJ, NY, PA, RI, VT")
-                        st.write("**Midwest:** IA, IL, IN, KS, MI, MN, MO, ND, NE, OH, SD, WI")
-                        st.write("**South:** AL, AR, DC, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV")
-                        st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
-
                 chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
                     theta="Revenue:Q", color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
                     tooltip=[alt.Tooltip(f'{col}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
                 ).properties(width=700, height=450)
-                
                 st.altair_chart(chart, use_container_width=False)
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
