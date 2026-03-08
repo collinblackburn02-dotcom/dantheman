@@ -7,13 +7,14 @@ PITCH_COMPANY_NAME = "LeadNavigator"
 PITCH_BRAND_COLOR = "#B3845C" 
 DEMO_PASSWORD = "leadnavai"
 
+# Hardcoded AWS headers based on your specific files
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
     "AGE_RANGE": "age",
     "INCOME_RANGE": "income",
     "PERSONAL_STATE": "state_raw",
-    "PERSONAL_ZIP": "zip_code", # 🚨 Added for hyper-local tracking
+    "PERSONAL_ZIP": "zip_code", # 🚨 Updated to your confirmed header
     "NET_WORTH": "net_worth",
     "SKIPTRACE_CREDIT_RATING": "credit_rating"
 }
@@ -66,20 +67,33 @@ def load_master_graph():
             path = f"s3://leadnav-demo-data/{f}"
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             temp_df.columns = [c.upper().strip() for c in temp_df.columns]
+            
+            # Use PERSONAL_EMAILS specifically
             e_col = 'PERSONAL_EMAILS' if 'PERSONAL_EMAILS' in temp_df.columns else temp_df.columns[0]
             temp_df = temp_df.rename(columns={e_col: 'email_match'})
+            
+            # 🚨 ZIP CODE FAIL-SAFE
+            if 'PERSONAL_ZIP' not in temp_df.columns:
+                zip_guess = next((c for c in temp_df.columns if 'ZIP' in c), None)
+                if zip_guess:
+                    temp_df = temp_df.rename(columns={zip_guess: 'PERSONAL_ZIP'})
+            
             dataframes.append(temp_df)
+            
         df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
         df = df.rename(columns=AWS_COLUMN_MAPPER)
         df.columns = [c.lower() for c in df.columns]
+        
+        # Identity Mapping
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
+        
         df['email_match'] = df['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email_match').reset_index(drop=True)
         return df.drop_duplicates(subset=['email_match']).reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 AWS Error: {e}"); st.stop()
+        st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
 
 # ================ 3. DASHBOARD =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
@@ -109,17 +123,21 @@ elif st.session_state.app_state == "dashboard":
         if is_unlocked:
             st.success("Full Access Granted")
             st.session_state.pres_mode = st.toggle("🎥 Presentation Mode", value=st.session_state.pres_mode)
-        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.session_state.pres_mode = False; st.rerun()
+        if st.button("🔄 New Analysis"): 
+            st.session_state.app_state = "onboarding"
+            st.session_state.pres_mode = False
+            st.rerun()
 
     if st.session_state.pres_mode:
-        if st.button("Exit Presentation Mode"): st.session_state.pres_mode = False; st.rerun()
+        if st.button("Exit Presentation Mode"): 
+            st.session_state.pres_mode = False
+            st.rerun()
 
     st.markdown("### 🔍 Single Variable Deep Dive")
-    
-    # 🚨 UPDATED VARIABLE CONFIG: Location is the parent
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
+    
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
-    if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region" # Default sub-level
+    if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
     
     var_cols = st.columns(len(configs))
     for i, (label, col_name) in enumerate(configs):
@@ -127,40 +145,39 @@ elif st.session_state.app_state == "dashboard":
             st.session_state.active_var = label
             st.rerun()
 
-    # 🚨 SUB-NAVIGATION FOR LOCATION
-    active_label = st.session_state.active_var
-    if active_label == "Location":
+    if st.session_state.active_var == "Location":
         st.markdown("<br>", unsafe_allow_html=True)
         l_col1, l_col2, l_col3, _ = st.columns([1, 1, 1, 5])
         if l_col1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
         if l_col2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
         if l_col3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
         
-        # Map sub-selection to actual column
         loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
         active_col = loc_map[st.session_state.active_loc_level]
         display_label = st.session_state.active_loc_level
     else:
-        active_col = dict(configs)[active_label]
-        display_label = active_label
+        active_col = dict(configs)[st.session_state.active_var]
+        display_label = st.session_state.active_var
 
-    df_p_full = st.session_state.df_icp
-    df_p = df_p_full if is_unlocked else df_p_full.head(100).copy()
+    full_df = st.session_state.df_icp
+    df_p = full_df if is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
 
-    # Process and display table
-    df_p_grp = df_p.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
-    df_p_grp = df_p_grp[~df_p_grp[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none'])]
-    
-    if not df_p_grp.empty:
-        df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
-        df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
+    if active_col in df_p.columns:
+        df_p_grp = df_p.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+        df_p_grp = df_p_grp[~df_p_grp[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none'])]
         
-        display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
-        styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
-        render_premium_table(styler)
-        st.download_button(f"📥 Download {display_label} Report", display_df.to_csv(index=False), f"LeadNavigator_{display_label}_Report.csv", "text/csv")
+        if not df_p_grp.empty:
+            df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
+            df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
+            
+            display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
+            styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
+            render_premium_table(styler)
+            st.download_button(f"📥 Download {display_label} Report", display_df.to_csv(index=False), f"LeadNavigator_{display_label}_Report.csv", "text/csv")
+    else:
+        st.warning(f"⚠️ {display_label} data not found in matched profiles.")
