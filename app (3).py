@@ -25,7 +25,7 @@ STATE_TO_REGION = {
     'AK':'West','AZ':'West','CA':'West','CO':'West','HI':'West','ID':'West','MT':'West','NM':'West','NV':'West','OR':'West','UT':'West','WA':'West','WY':'West'
 }
 
-st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="centered")
+st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="wide") # 🚨 Wide layout for 2-col
 
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "df_icp" not in st.session_state: st.session_state.df_icp = None
@@ -38,10 +38,10 @@ def apply_custom_theme(primary_color):
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 700 !important; }}
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; }}
-            .premium-table-container {{ width: 700px !important; margin: 0 auto 5rem auto; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; }}
+            .premium-table-container {{ margin-bottom: 2rem; border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
-            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; padding: 12px; text-transform: uppercase; font-size: 0.75rem; }}
-            .premium-table-container td {{ text-align: center !important; padding: 10px; border-bottom: 1px solid #F0EAD6; font-size: 0.9rem; }}
+            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; padding: 10px; text-transform: uppercase; font-size: 0.7rem; }}
+            .premium-table-container td {{ text-align: center !important; padding: 8px; border-bottom: 1px solid #F0EAD6; font-size: 0.85rem; }}
         </style>
     """, unsafe_allow_html=True)
 
@@ -128,16 +128,12 @@ if st.session_state.app_state == "onboarding":
         with st.spinner("Executing LeadNavigator Identity Resolution..."):
             df_master = load_master_graph()
             df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
-            
-            # Match the FULL file first
             df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
             
             if not df_joined.empty:
                 st.session_state.df_icp = df_joined
                 st.session_state.app_state = "dashboard"
                 st.rerun()
-            else:
-                st.error("⚠️ Zero matches found.")
 
 # ================ 4. DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
@@ -153,10 +149,8 @@ elif st.session_state.app_state == "dashboard":
     st.markdown(f"## 🧬 Identity Match Result {'(Unlocked)' if is_unlocked else '(Restricted)'}")
     if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
     
-    # 🚨 UPDATED CLIPPING LOGIC: Clip by Unique Order IDs 🚨
     full_df = st.session_state.df_icp
     if not is_unlocked:
-        # Get the IDs of the first 100 unique buyers
         top_100_ids = full_df['Order ID'].unique()[:100]
         df = full_df[full_df['Order ID'].isin(top_100_ids)].copy()
     else:
@@ -170,29 +164,38 @@ elif st.session_state.app_state == "dashboard":
     st.markdown("<hr>", unsafe_allow_html=True)
 
     configs = [
-        ("Gender", "gender"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating"), 
-        ("Household Income", "income"), ("Net Worth", "net_worth"), ("Geographic Region", "region"), ("Age Range", "age")
+        ("Gender", "gender"), ("Marital Status", "marital_status"), 
+        ("Age Range", "age"), ("Credit Rating", "credit_rating"), 
+        ("Household Income", "income"), ("Net Worth", "net_worth"), 
+        ("Geographic Region", "region")
     ]
 
-    for label, col in configs:
-        if col in df.columns:
-            chart_data = df.copy()
-            chart_data = chart_data[~chart_data[col].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
-            
-            if not chart_data.empty:
-                grp = chart_data.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
-                st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
-                
-                chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
-                    theta="Revenue:Q", 
-                    color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
-                    tooltip=[alt.Tooltip(f'{col}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
-                ).properties(width=700, height=450)
-                
-                st.altair_chart(chart, use_container_width=False)
-                
-                grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
-                grp['AOV'] = grp['Revenue'] / grp['Buyers']
-                grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
-                
-                render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}).background_gradient(subset=['% Share'], cmap=custom_light_green))
+    # 🚨 DUAL-COLUMN RENDERER 🚨
+    for i in range(0, len(configs), 2):
+        row_cols = st.columns(2) # Create 2 variables per row
+        
+        for j in range(2):
+            if i + j < len(configs):
+                label, col_key = configs[i+j]
+                with row_cols[j]:
+                    if col_key in df.columns:
+                        chart_data = df.copy()
+                        chart_data = chart_data[~chart_data[col_key].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
+                        
+                        if not chart_data.empty:
+                            grp = chart_data.groupby(col_key).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+                            st.markdown(f"<h3 style='text-align: center;'>{label}</h3>", unsafe_allow_html=True)
+                            
+                            chart = alt.Chart(grp).mark_arc(innerRadius=60, stroke="#fff").encode(
+                                theta="Revenue:Q", 
+                                color=alt.Color(f"{col_key}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", labelFontSize=10)),
+                                tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
+                            ).properties(height=300)
+                            
+                            st.altair_chart(chart, use_container_width=True)
+                            
+                            grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
+                            grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
+                            
+                            # Compact table for 2-col view
+                            render_premium_table(grp[['label', 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
