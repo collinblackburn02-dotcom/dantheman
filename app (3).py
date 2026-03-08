@@ -53,7 +53,6 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# BUCKETING LOGIC
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -75,22 +74,23 @@ def bucket_credit(val):
     if v in ['F', 'G']: return "Low (F, G)"
     return "Unknown"
 
-# ================ 2. LIVE AWS CONNECTION =================
+# ================ 2. LIVE AWS CONNECTION (MULTI-FILE) =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
+    
+    # 🚨 RESTORED: Loading both AWS files to maximize match pool
     files = ["master_data.csv", "visitor_data_2.csv"] 
     dataframes = []
     
     try:
         for f in files:
             path = f"s3://leadnav-demo-data/{f}"
-            # 🚨 latin1 is more permissive for messy CSVs
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             dataframes.append(temp_df)
             
         df = pd.concat(dataframes, axis=0, ignore_index=True)
-        df.columns = [c.upper() for c in df.columns] # Use Upper for mapping safety
+        df.columns = [c.upper() for c in df.columns] 
         df = df.reset_index(drop=True)
         
         # Mapping Logic
@@ -106,14 +106,11 @@ def load_master_graph():
         if 'marital_status' in df.columns:
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
-        # 🚨 SUPER-MATCH LOGIC: Prioritize PERSONAL_EMAILS over hashes
+        # 🚨 SUPER-MATCH: Targeted clean to remove non-printable characters
         target_email_col = 'PERSONAL_EMAILS' if 'PERSONAL_EMAILS' in df.columns else None
         if not target_email_col:
-            # Fallback to anything with "EMAIL" that ISN'T a hash
-            potential_cols = [c for c in df.columns if 'EMAIL' in c and 'SHA' not in c and 'HEM' not in c]
+            potential_cols = [c for c in df.columns if 'EMAIL' in c and 'SHA' not in c]
             target_email_col = potential_cols[0] if potential_cols else df.columns[0]
-        
-        st.sidebar.write(f"🔍 Identity Graph matching on AWS column: **{target_email_col}**")
         
         df = df.rename(columns={target_email_col: 'Email'})
         df['Email'] = df['Email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
@@ -134,13 +131,7 @@ if st.session_state.app_state == "onboarding":
         
         with st.spinner("Executing Identity Resolution..."):
             df_master = load_master_graph()
-            
-            # Clean order emails identically to the master list
             df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
-            
-            # Diagnostic count
-            unique_orders = df_orders['Email'].nunique()
-            st.sidebar.write(f"📊 Unique Emails Uploaded: {unique_orders}")
             
             df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
             
@@ -149,7 +140,7 @@ if st.session_state.app_state == "onboarding":
                 st.session_state.app_state = "dashboard"
                 st.rerun()
             else:
-                st.error("⚠️ Zero Matches. Check sidebar diagnostics for column names.")
+                st.error("⚠️ Zero Matches found.")
 
 # ================ 4. STATE 2: DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
@@ -164,9 +155,15 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # 🚨 RESTORED: All 7 graphs in the correct order
     configs = [
-        ("Gender", "gender"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating"), 
-        ("Household Income", "income"), ("Net Worth", "net_worth"), ("Geographic Region", "region"), ("Age Range", "age")
+        ("Gender", "gender"), 
+        ("Marital Status", "marital_status"), 
+        ("Credit Rating", "credit_rating"), 
+        ("Household Income", "income"), 
+        ("Net Worth", "net_worth"), 
+        ("Geographic Region", "region"), 
+        ("Age Range", "age")
     ]
 
     for label, col in configs:
@@ -176,11 +173,19 @@ elif st.session_state.app_state == "dashboard":
             
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
+                if col == "region":
+                    with st.expander("📍 View Regional Identity Map"):
+                        st.write("**Northeast:** CT, MA, ME, NH, NJ, NY, PA, RI, VT")
+                        st.write("**Midwest:** IA, IL, IN, KS, MI, MN, MO, ND, NE, OH, SD, WI")
+                        st.write("**South:** AL, AR, DC, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV")
+                        st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
+
                 chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
                     theta="Revenue:Q", color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
                     tooltip=[alt.Tooltip(f'{col}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
                 ).properties(width=700, height=450)
                 st.altair_chart(chart, use_container_width=False)
+
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
