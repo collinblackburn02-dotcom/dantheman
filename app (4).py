@@ -39,6 +39,7 @@ def apply_custom_theme(primary_color, is_pres_mode):
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
+            [data-testid="stMetricDelta"] svg {{ display: none; }} /* 🚨 Hides the delta arrow */
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -130,17 +131,22 @@ elif st.session_state.app_state == "dashboard":
     st.markdown("<br>", unsafe_allow_html=True)
 
     # 🚨 2. EXECUTIVE SUMMARY: TOP PERFORMERS
-    st.markdown("### 🏆 Executive Summary: Top Demographic Performers")
+    st.markdown("### 🏆 Executive Summary")
     summary_cols = st.columns(5)
     core_vars = [("Gender", "gender"), ("Age", "age"), ("Region", "region"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     
+    total_revenue_overall = df_p['revenue_raw'].sum()
+
     for idx, (label, col_key) in enumerate(core_vars):
         if col_key in df_p.columns:
             temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
             if not temp.empty:
-                winner = temp.groupby(col_key)['revenue_raw'].sum().idxmax()
-                rev_val = temp.groupby(col_key)['revenue_raw'].sum().max()
-                summary_cols[idx].metric(label, winner, f"${rev_val:,.0f} Total")
+                rev_series = temp.groupby(col_key)['revenue_raw'].sum()
+                winner = rev_series.idxmax()
+                rev_val = rev_series.max()
+                rev_pct = (rev_val / total_revenue_overall) * 100 # 🚨 Accounts for % of revenue
+                
+                summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue", delta_color="off")
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
