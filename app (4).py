@@ -7,7 +7,6 @@ PITCH_COMPANY_NAME = "LeadNavigator"
 PITCH_BRAND_COLOR = "#B3845C" 
 DEMO_PASSWORD = "leadnavai"
 
-# Hardcoded AWS headers based on your specific files
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
@@ -56,7 +55,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# ================ 2. AWS DATA ENGINE =================
+# ================ 2. DATA ENGINE =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -67,21 +66,8 @@ def load_master_graph():
             path = f"s3://leadnav-demo-data/{f}"
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             temp_df.columns = [c.upper().strip() for c in temp_df.columns]
-            
-            # Use PERSONAL_EMAILS specifically
             e_col = 'PERSONAL_EMAILS' if 'PERSONAL_EMAILS' in temp_df.columns else temp_df.columns[0]
             temp_df = temp_df.rename(columns={e_col: 'email_match'})
-            
-            # 🚨 FORCE ZIP CODE FORMATTING
-            if 'PERSONAL_ZIP' in temp_df.columns:
-                temp_df['PERSONAL_ZIP'] = temp_df['PERSONAL_ZIP'].astype(str).str.split('.').str[0].str.zfill(5)
-            else:
-                # Fail-safe search
-                zip_guess = next((c for c in temp_df.columns if 'ZIP' in c), None)
-                if zip_guess:
-                    temp_df = temp_df.rename(columns={zip_guess: 'PERSONAL_ZIP'})
-                    temp_df['PERSONAL_ZIP'] = temp_df['PERSONAL_ZIP'].astype(str).str.split('.').str[0].str.zfill(5)
-            
             dataframes.append(temp_df)
             
         df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
@@ -92,6 +78,12 @@ def load_master_graph():
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
+        
+        # 🚨 ROBUST ZIP CLEANING
+        if 'zip_code' in df.columns:
+            df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
+            df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
+            df['zip_code'] = df['zip_code'].str.zfill(5)
         
         df['email_match'] = df['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email_match').reset_index(drop=True)
@@ -158,8 +150,8 @@ elif st.session_state.app_state == "dashboard":
         active_col = dict(configs)[st.session_state.active_var]
         display_label = st.session_state.active_var
 
-    df_p_full = st.session_state.df_icp
-    df_p = df_p_full if is_unlocked else df_p_full.head(100).copy()
+    full_df = st.session_state.df_icp
+    df_p = full_df if is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
     m1, m2 = st.columns(2)
@@ -167,8 +159,10 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
 
     if active_col in df_p.columns:
-        df_p_grp = df_p.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
-        df_p_grp = df_p_grp[~df_p_grp[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none'])]
+        # 🚨 FILTER NULLS
+        df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
+        
+        df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
         
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
@@ -177,5 +171,3 @@ elif st.session_state.app_state == "dashboard":
             display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
             render_premium_table(styler)
-    else:
-        st.warning(f"⚠️ {display_label} data not found in matched profiles. Check column headers in AWS.")
