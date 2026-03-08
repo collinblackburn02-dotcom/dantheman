@@ -54,7 +54,7 @@ configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region"
 def load_master_graph():
     """Reads your live master list directly from AWS S3."""
     
-    # Now explicitly pointing to Ohio!
+    # Explicitly pointing to Ohio!
     YOUR_AWS_REGION = "us-east-2" 
     
     aws_keys = {
@@ -78,6 +78,7 @@ def load_master_graph():
         # If anything goes wrong, this will print the REAL AWS error on your dashboard!
         st.error(f"🚨 **AWS Connection Error:** {str(e)}")
         st.stop()
+
 # ================ 3. STATE 1: ONBOARDING SCREEN =================
 if st.session_state.app_state == "onboarding":
     
@@ -115,7 +116,9 @@ if st.session_state.app_state == "onboarding":
                     with st.spinner("Resolving Identities and Calculating Match Rate..."):
                         df_orders['Total'] = df_orders['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True)
                         df_orders['Total'] = pd.to_numeric(df_orders['Total'], errors='coerce').fillna(0)
-                        df_orders = df_orders.drop_duplicates(subset=['Order_ID'], keep='first')
+                        
+                        # FIX 1: Use 'Order ID' instead of 'Order_ID'
+                        df_orders = df_orders.drop_duplicates(subset=['Order ID'], keep='first')
                         
                         # === THE LEAD MAGNET GATEKEEPER ===
                         if len(df_orders) > 1000:
@@ -127,7 +130,6 @@ if st.session_state.app_state == "onboarding":
                         df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
                         
                         # === REAL AWS MATCH LOGIC ===
-                        # Inner join ensures we only keep orders where the email exists in your AWS CSV
                         df_joined = pd.merge(df_orders, df_master_aws, on='Email', how='inner')
                         
                         if df_joined.empty:
@@ -162,7 +164,9 @@ elif st.session_state.app_state == "dashboard":
     st.markdown("<br>", unsafe_allow_html=True)
     
     df_joined = st.session_state.df_icp
-    total_buyers = df_joined['Order_ID'].nunique()
+    
+    # FIX 2: Use 'Order ID' instead of 'Order_ID'
+    total_buyers = df_joined['Order ID'].nunique()
     total_rev = df_joined['Total'].sum()
     overall_aov = total_rev / total_buyers if total_buyers > 0 else 0
     
@@ -175,7 +179,8 @@ elif st.session_state.app_state == "dashboard":
     dash_col1, dash_col2 = st.columns(2)
     for index, (label, col_name) in enumerate(configs):
         if col_name in df_joined.columns:
-            grp = df_joined[df_joined[col_name] != 'Unknown'].groupby(col_name).agg(Buyers=('Order_ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+            # FIX 3: Use 'Order ID' instead of 'Order_ID'
+            grp = df_joined[df_joined[col_name] != 'Unknown'].groupby(col_name).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
                 grp['% of Buyers'] = (grp['Buyers'] / grp['Buyers'].sum()) * 100
