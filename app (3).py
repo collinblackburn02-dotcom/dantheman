@@ -3,11 +3,10 @@ import pandas as pd
 import matplotlib.colors as mcolors
 import altair as alt
 
-# ================ 1. PITCH CONFIGURATION =================
+# ================ 1. CONFIGURATION =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#0A2540" 
 
-# Mapping raw headers to clean labels
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
@@ -51,7 +50,6 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# 🚨 UPDATED BUCKETING TO ENSURE LABELS ARE RETURNED EVEN IF INPUT IS MESSY
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -73,7 +71,7 @@ def bucket_credit(val):
     if v in ['F', 'G']: return "Low (F, G)"
     return "Unknown"
 
-# ================ 2. LIVE AWS CONNECTION (RESTORED DUAL-FILE) =================
+# ================ 2. LIVE AWS CONNECTION (STABLE DUAL-FILE) =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -89,13 +87,11 @@ def load_master_graph():
             
         df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
         
-        # Mapping Logic
+        # Rename and clean columns
         df = df.rename(columns=AWS_COLUMN_MAPPER)
-        
-        # Force lower-case for our dashboard labels to avoid mismatches
         df.columns = [c.lower() for c in df.columns]
         
-        # Transformations (using lower-case mapped names)
+        # Identity Logic
         if 'state_raw' in df.columns: 
             df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Other')
         if 'income' in df.columns: df['income'] = df['income'].apply(bucket_income)
@@ -107,7 +103,7 @@ def load_master_graph():
         if 'marital_status' in df.columns:
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
-        # Clean Emails
+        # email explosion
         email_col = next((c for c in df.columns if 'email' in c), 'email')
         df['email'] = df[email_col].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email').reset_index(drop=True)
@@ -129,6 +125,7 @@ if st.session_state.app_state == "onboarding":
             df_master = load_master_graph()
             df_orders['email'] = df_orders['email'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
             
+            # 🚨 THE CLEAN MERGE: No aggressive filtering here!
             df_joined = pd.merge(df_orders, df_master, on='email', how='inner').reset_index(drop=True)
             
             if not df_joined.empty:
@@ -146,12 +143,12 @@ elif st.session_state.app_state == "dashboard":
     df = st.session_state.df_icp
     df['Total'] = pd.to_numeric(df['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
+    # 🚨 TOP KPI: ALWAYS SHOWS FULL MATCH POOL
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
     with m2: st.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # 🚨 ALL 7 VARIABLES LISTED EXPLICITLY 🚨
     configs = [
         ("Gender", "gender"), 
         ("Marital Status", "marital_status"), 
@@ -163,15 +160,14 @@ elif st.session_state.app_state == "dashboard":
     ]
 
     for label, col in configs:
-        # Check if column exists, even if it has NaNs
         if col in df.columns:
-            # Group by column to see what we have
-            grp = df.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+            # 🚨 THE INDEPENDENT FILTER: Only filter "Unknown" for THIS specific chart!
+            df_chart_data = df.copy()
+            df_chart_data = df_chart_data[~df_chart_data[col].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
             
-            # Remove purely "empty" rows for the chart
-            grp = grp[~grp[col].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
-            
-            if not grp.empty:
+            if not df_chart_data.empty:
+                grp = df_chart_data.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
+                
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
                 
                 if col == "region":
@@ -194,6 +190,3 @@ elif st.session_state.app_state == "dashboard":
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
                 
                 render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}).background_gradient(subset=['% Share'], cmap=custom_light_green))
-            else:
-                # If we have matches but this specific variable is empty, let the user know
-                st.info(f"ℹ️ {label} data is unavailable for this specific matched segment.")
