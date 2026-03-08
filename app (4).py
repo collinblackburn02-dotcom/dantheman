@@ -35,18 +35,17 @@ def apply_custom_theme(primary_color):
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
             
-            [data-testid="stSidebar"] {{ display: none; }}
-            [data-testid="collapsedControl"] {{ display: none; }}
+            /* 🚨 Force hide sidebar completely */
+            [data-testid="stSidebar"] {{ display: none !important; }}
+            [data-testid="collapsedControl"] {{ display: none !important; }}
 
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
             
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
-            [data-testid="stMetricDelta"] {{ color: #09AB3B !important; }}
-            [data-testid="stMetricDelta"] svg {{ display: none; }} 
             
-            .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; margin-bottom: 2rem; }} /* Increased bottom margin */
+            .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; margin-bottom: 2rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
             .premium-table-container td {{ text-align: center !important; padding: 12px !important; border-bottom: 1px solid #F0EAD6 !important; font-size: 0.85rem !important; }}
@@ -61,7 +60,8 @@ def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
 # ================ 2. DATA ENGINE =================
-@st.cache_data(ttl=3600) 
+# 🚨 Added show_spinner=False to hide the function name
+@st.cache_data(ttl=3600, show_spinner=False) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
     files = ["master_data.csv", "visitor_data_2.csv"] 
@@ -83,15 +83,13 @@ def load_master_graph():
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         if 'zip_code' in df.columns:
-            df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
-            df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
-            df['zip_code'] = df['zip_code'].str.zfill(5)
+            df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(5)
         
         df['email_match'] = df['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email_match').reset_index(drop=True)
         return df.drop_duplicates(subset=['email_match']).reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 AWS Connection Issue: {e}"); st.stop()
+        st.error(f"🚨 Connection Issue: {e}"); st.stop()
 
 # ================ 3. DASHBOARD FLOW =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
@@ -104,15 +102,19 @@ if st.session_state.app_state == "onboarding":
         if uploaded_file:
             df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
             df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
-            df_master = load_master_graph()
-            df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.strip()
-            df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
-            if not df_joined.empty:
-                st.session_state.df_icp = df_joined
-                st.session_state.app_state = "dashboard"
-                st.rerun()
+            
+            # 🚨 Branded Pitch Loading Message
+            with st.spinner("Identifying Your Customer Insights..."):
+                df_master = load_master_graph()
+                df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.strip()
+                df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
+                if not df_joined.empty:
+                    st.session_state.df_icp = df_joined
+                    st.session_state.app_state = "dashboard"
+                    st.rerun()
 
 elif st.session_state.app_state == "dashboard":
+    # 🚨 New Analysis button moved to main dashboard area
     c1, _ = st.columns([1, 5])
     if c1.button("🔄 New Analysis"): 
         st.session_state.app_state = "onboarding"
@@ -127,15 +129,10 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. TOP PERFORMING DEMOGRAPHICS (Leaderboard)
+    # 2. TOP PERFORMING DEMOGRAPHICS
     st.markdown("### 🏆 Top Performing Demographics")
     total_rev = df_p['revenue_raw'].sum()
-    # Expanded with Credit Rating
-    summary_vars = [
-        ("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), 
-        ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"),
-        ("Credit Rating", "credit_rating")
-    ]
+    summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
     summary_cols = st.columns(len(summary_vars))
     for idx, (label, col_key) in enumerate(summary_vars):
         if col_key in df_p.columns:
@@ -151,7 +148,6 @@ elif st.session_state.app_state == "dashboard":
     # 3. SINGLE VARIABLE DEEP DIVE
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
-    
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
     if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
     
@@ -174,7 +170,7 @@ elif st.session_state.app_state == "dashboard":
         active_col = dict(configs)[st.session_state.active_var]
         display_label = st.session_state.active_var
 
-    # 4. PROCESSING & PRETTY CHART
+    # 4. PROCESSING & PITCH-READY CHART
     if active_col in df_p.columns:
         df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
         df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
@@ -185,24 +181,20 @@ elif st.session_state.app_state == "dashboard":
             disp_name = display_label.upper()
             display_df = df_p_grp.rename(columns={active_col: disp_name}).sort_values('Revenue', ascending=False)
             
-            # Premium Table
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Revenue', '% of Buyers'], cmap=custom_light_green)
             render_premium_table(styler)
 
-            # 🚨 ADDED SPACING AND BREAK FOR THE CHART 🚨
             st.markdown("<br><br>", unsafe_allow_html=True)
             
-            chart_expander_label = f"🗺️ {display_label} Revenue Concentration" if st.session_state.active_var == "Location" else f"📊 {display_label} Distribution Analysis"
-            with st.expander(chart_expander_label, expanded=True):
+            with st.expander(f"📊 {display_label} Distribution Analysis", expanded=True):
                 chart_df = display_df.head(15).copy()
-                
                 pretty_chart = alt.Chart(chart_df).mark_bar(
                     cornerRadiusTopLeft=8, cornerRadiusTopRight=8, stroke="#E2D7C8", strokeWidth=0.5
                 ).encode(
                     x=alt.X(f'{disp_name}:N', sort='-y', axis=alt.Axis(labelAngle=-45, title=None, labelFont='Outfit', labelFontSize=12)),
                     y=alt.Y('Revenue:Q', axis=alt.Axis(format='$,.0f', grid=True, title="Total Revenue ($)", titleFont='Outfit')),
                     color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
-                    tooltip=[disp_name, alt.Tooltip('Revenue:Q', format='$,.2f'), alt.Tooltip('Purchasers:Q')]
+                    tooltip=[disp_name, alt.Tooltip('Revenue:Q', format='$,.2f')]
                 ).configure_view(strokeOpacity=0).properties(height=400)
                 
                 st.altair_chart(pretty_chart, use_container_width=True)
