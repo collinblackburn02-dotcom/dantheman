@@ -33,6 +33,10 @@ STATE_TO_REGION = {
 
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="centered")
 
+# --- FIX: INITIALIZE SESSION STATE ---
+if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
+if "df_icp" not in st.session_state: st.session_state.df_icp = None
+
 def apply_custom_theme(primary_color):
     st.markdown(f"""
         <style>
@@ -80,10 +84,10 @@ def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
     try:
         df = pd.read_csv("s3://leadnav-demo-data/master_data.csv", storage_options=aws_keys, low_memory=False)
-        
-        # Mapping & Formatting
-        rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df.columns = [c.lower() for c in df.columns]
+        
+        # Mapping
+        rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
         
         # B2C Transformation
@@ -92,10 +96,13 @@ def load_master_graph():
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
         
-        # Email Explosion
+        # Email Explosion Fix
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
-        df['Email'] = df['Email'].astype(str).str.lower().str.split(',').explode().str.strip()
+        df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
+        df = df.explode('Email')
+        df['Email'] = df['Email'].str.strip()
+        
         return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
@@ -132,8 +139,7 @@ elif st.session_state.app_state == "dashboard":
 
     for label, col in display_configs:
         if col in df.columns:
-            # Filter unknowns
-            df_plot = df[~df[col].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', ''])]
+            df_plot = df[~df[col].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', '', 'other'])]
             grp = df_plot.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
@@ -146,7 +152,7 @@ elif st.session_state.app_state == "dashboard":
                         st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
 
                 chart = alt.Chart(grp).mark_arc(innerRadius=80, stroke="#fff").encode(
-                    theta="Revenue:Q", color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=None),
+                    theta="Revenue:Q", color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", columns=2)),
                     tooltip=[col, alt.Tooltip('Revenue', format='$,.0f')]
                 ).properties(height=500)
                 st.altair_chart(chart, use_container_width=True)
