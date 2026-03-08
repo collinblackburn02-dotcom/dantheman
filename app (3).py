@@ -25,11 +25,7 @@ STATE_TO_REGION = {
     'AK':'West','AZ':'West','CA':'West','CO':'West','HI':'West','ID':'West','MT':'West','NM':'West','NV':'West','OR':'West','UT':'West','WA':'West','WY':'West'
 }
 
-# 🚨 SET WIDE LAYOUT FOR 2-COLUMN VIEW
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="wide")
-
-if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
-if "df_icp" not in st.session_state: st.session_state.df_icp = None
 
 def apply_custom_theme(primary_color):
     st.markdown(f"""
@@ -37,15 +33,13 @@ def apply_custom_theme(primary_color):
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
-            
-            /* Center the main headers */
-            h1, h2, h3 {{ 
+            h3 {{ 
                 color: #2D2421 !important; 
                 font-weight: 700 !important; 
                 text-align: center !important; 
-                margin-bottom: 1.5rem !important;
+                padding-top: 2.5rem !important; 
+                margin-bottom: 1rem !important;
             }}
-            
             [data-testid="stMetric"] {{ 
                 background-color: #FFFFFF; 
                 border: 1px solid #E2D7C8; 
@@ -53,9 +47,8 @@ def apply_custom_theme(primary_color):
                 padding: 20px; 
                 text-align: center;
             }}
-            
             .premium-table-container {{ 
-                margin: 0 auto 2rem auto; 
+                margin: 1rem auto 4rem auto; 
                 border-radius: 12px; 
                 border: 1px solid #E2D7C8; 
                 background: #FFFFFF; 
@@ -74,19 +67,19 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# BUCKETING
+# 🚨 CORRECTED BUCKETING LOGIC
 def bucket_income(val):
     v = str(val).lower()
-    if any(x in v for x in ['250', '500']): return "High ($250k+)"
-    if any(x in v for x in ['125', '150', '175', '200']): return "Med-High ($125k-$249k)"
-    if any(x in v for x in ['50', '75', '100']): return "Medium ($50k-$124k)"
+    if '250,000' in v or '500,000' in v: return "High ($250k+)"
+    if any(x in v for x in ['125,000', '150,000', '175,000', '200,000']): return "Med-High ($125k-$249k)"
+    if any(x in v for x in ['50,000', '75,000', '100,000']): return "Medium ($50k-$124k)"
     return "Low (Under $50k)"
 
 def bucket_nw(val):
     v = str(val).lower()
-    if any(x in v for x in ['1,000', '2,000', '5,000']): return "High ($1M+)"
-    if any(x in v for x in ['250', '500']): return "Med-High ($250k-$999k)"
-    if any(x in v for x in ['50', '100']): return "Medium ($50k-$249k)"
+    if any(x in v for x in ['1,000,000', '2,000,000', '5,000,000']): return "High ($1M+)"
+    if any(x in v for x in ['250,000', '500,000']): return "Med-High ($250k-$999k)"
+    if any(x in v for x in ['50,000', '100,000']): return "Medium ($50k-$249k)"
     return "Low (Under $50k)"
 
 def bucket_credit(val):
@@ -123,6 +116,8 @@ def load_master_graph():
         
         if 'state_raw' in df.columns: 
             df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Other')
+        
+        # Apply corrected bucketing
         if 'income' in df.columns: df['income'] = df['income'].apply(bucket_income)
         if 'net_worth' in df.columns: df['net_worth'] = df['net_worth'].apply(bucket_nw)
         if 'credit_rating' in df.columns: df['credit_rating'] = df['credit_rating'].apply(bucket_credit)
@@ -141,11 +136,11 @@ def load_master_graph():
         st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
 
 # ================ 3. ONBOARDING =================
+if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if st.session_state.app_state == "onboarding":
-    # Simple centered landing
     _, col, _ = st.columns([1, 2, 1])
     with col:
-        st.markdown(f"<h1 style='font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
         uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
         if uploaded_file:
             df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
@@ -172,9 +167,10 @@ elif st.session_state.app_state == "dashboard":
         else:
             st.warning("Preview Mode: First 100 Matches")
 
-    # Layout spacing
-    st.markdown(f"## 🧬 Identity Match Result {'(Unlocked)' if is_unlocked else '(Restricted)'}")
-    if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
+    st.markdown(f"<h2 style='text-align: center;'>🧬 Identity Match Result {'(Unlocked)' if is_unlocked else '(Restricted)'}</h2>", unsafe_allow_html=True)
+    if st.button("← New Analysis", type="secondary"): 
+        st.session_state.app_state = "onboarding"
+        st.rerun()
     
     full_df = st.session_state.df_icp
     if not is_unlocked:
@@ -185,12 +181,9 @@ elif st.session_state.app_state == "dashboard":
 
     df['revenue_raw'] = pd.to_numeric(df['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
-    # Clean KPI Display
-    _, kpi_col, _ = st.columns([1, 4, 1])
-    with kpi_col:
-        m1, m2 = st.columns(2)
-        m1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
-        m2.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
+    m1, m2 = st.columns(2)
+    m1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
+    with m2: st.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
     configs = [
@@ -200,10 +193,8 @@ elif st.session_state.app_state == "dashboard":
         ("Geographic Region", "region")
     ]
 
-    # 🚨 DESIGN OVERHAUL: SIDE-BY-SIDE RENDERER
     for i in range(0, len(configs), 2):
         row_cols = st.columns(2)
-        
         for j in range(2):
             if i + j < len(configs):
                 label, col_key = configs[i+j]
@@ -214,19 +205,18 @@ elif st.session_state.app_state == "dashboard":
                         
                         if not chart_data.empty:
                             grp = chart_data.groupby(col_key).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+                            st.markdown(f"<h3>{label}</h3>", unsafe_allow_html=True)
                             
-                            # 🚨 ALTAIR DESIGN FIX: Centered Title + Large Legend
-                            chart = alt.Chart(grp).mark_arc(innerRadius=70, stroke="#fff").encode(
+                            chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                                 theta=alt.Theta("Revenue:Q"), 
                                 color=alt.Color(f"{col_key}:N", 
                                               scale=alt.Scale(scheme='tableau20'), 
-                                              legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=200, columns=2)),
+                                              legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=240, columns=2)),
                                 tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
-                            ).properties(title=alt.TitleParams(text=label, fontSize=24, anchor='middle'), height=450, width="container")
+                            ).properties(height=450, width="container")
                             
                             st.altair_chart(chart, use_container_width=True)
                             
-                            # Refined Table
                             grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                             grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
                             render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
