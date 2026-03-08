@@ -62,7 +62,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# SIMPLIFIED CATEGORIES
+# 🚨 UPDATED SIMPLIFIED LABELING LOGIC 🚨
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High"
@@ -94,9 +94,12 @@ def load_master_graph():
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
+        
+        # Applying the simplified labeling
         if 'income_raw' in df.columns: df['income'] = df['income_raw'].apply(bucket_income)
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
+        
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
         df['Email'] = df['Email'].astype(str).str.lower().str.split(',').explode().str.strip()
@@ -131,6 +134,7 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # LOOP THROUGH B2C VARIABLES
     configs = [
         ("Credit Rating", "credit_rating"), ("Household Income", "income"), ("Net Worth", "net_worth"), 
         ("Regional Footprint", "region"), ("Age Range", "age"), ("Gender", "gender"), ("Marital Status", "marital_status")
@@ -138,22 +142,23 @@ elif st.session_state.app_state == "dashboard":
 
     for label, col in configs:
         if col in df.columns:
+            # Filter unknowns and group
             df_plot = df[~df[col].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', '', 'other'])]
             grp = df_plot.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
                 
-                # --- SYNCED PIE CHART ---
+                # --- SYNCED PIE CHART WITH RIGHT-ALIGNED LEGEND ---
                 chart = alt.Chart(grp).mark_arc(innerRadius=80, stroke="#fff").encode(
                     theta="Revenue:Q",
                     color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
                     tooltip=[col, alt.Tooltip('Revenue', format='$,.0f')]
                 ).properties(width=700, height=400)
                 
-                st.altair_chart(chart, use_container_width=False) # container=False to respect fixed width
+                st.altair_chart(chart, use_container_width=False)
                 
-                # --- SYNCED TABLE ---
+                # --- SYNCED TABLE WITH GREEN GRADIENT ---
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
