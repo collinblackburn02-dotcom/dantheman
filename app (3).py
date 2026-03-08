@@ -9,7 +9,6 @@ PITCH_COMPANY_NAME = "LeadNavigator"
 PITCH_BRAND_COLOR = "#0A2540" 
 
 # 🚨 THE DATA MAPPER 🚨
-# Matches your exact AWS CSV headers to our dashboard labels
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "AGE_RANGE": "age",
@@ -55,7 +54,6 @@ def render_premium_table(styler_obj):
     html = styler_obj.to_html()
     st.markdown(f'<div class="premium-table-container">{html}</div>', unsafe_allow_html=True)
 
-# THE DASHBOARD CONFIG (Stacked single-column layout)
 configs = [
     ("Gender Distribution", "gender"), 
     ("Age Range", "age"), 
@@ -81,11 +79,9 @@ def load_master_graph():
     
     try:
         df_master = pd.read_csv(s3_file_path, storage_options=aws_keys, low_memory=False)
-        
-        # FIX: Reset index immediately after loading to prevent reindexing errors
         df_master = df_master.reset_index(drop=True)
         
-        # Mapping
+        # Mapping Column Names
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         current_cols_lower = {c.lower(): c for c in df_master.columns}
         for map_key, map_val in rename_dict.items():
@@ -97,9 +93,12 @@ def load_master_graph():
         if email_cols:
             df_master = df_master.rename(columns={email_cols[0]: 'Email'})
             df_master['Email'] = df_master['Email'].astype(str).str.lower().str.split(',')
-            df_master = df_master.explode('Email').str.strip()
             
-            # FIX: Drop duplicates and Reset Index AGAIN to finalize unique labels
+            # --- FIX: EXPLODE AND STRIP TARGETED COLUMN ---
+            df_master = df_master.explode('Email')
+            df_master['Email'] = df_master['Email'].str.strip()
+            
+            # Final deduplication and index cleaning
             df_master = df_master.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
             
         return df_master
@@ -158,10 +157,10 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${total_rev:,.2f}")
     st.markdown("<br><hr><br>", unsafe_allow_html=True)
 
-    # Visual Reporting Loop (Stacked Single Column)
+    # Visual Reporting Loop
     for label, col_name in configs:
         if col_name in df_joined.columns:
-            # CLEANING: Filter out "U", "Unknown", "nan", etc.
+            # CLEANING: Filter out U, Unknown, etc.
             df_filtered = df_joined[~df_joined[col_name].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', 'null', ''])]
             
             grp = df_filtered.groupby(col_name).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
@@ -169,7 +168,7 @@ elif st.session_state.app_state == "dashboard":
             if not grp.empty:
                 st.markdown(f"## {label}")
                 
-                # --- PREMIUM DONUT CHART ---
+                # --- PIE/DONUT CHART ---
                 pie_chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                     theta=alt.Theta(field="Revenue", type="quantitative"),
                     color=alt.Color(field=col_name, type="nominal", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", columns=3)),
@@ -178,7 +177,7 @@ elif st.session_state.app_state == "dashboard":
                 
                 st.altair_chart(pie_chart, use_container_width=True)
                 
-                # --- ENHANCED DATA TABLE ---
+                # --- DATA TABLE ---
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_name: label})
