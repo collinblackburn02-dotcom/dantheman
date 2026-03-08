@@ -10,12 +10,12 @@ PITCH_BRAND_COLOR = "#0A2540"
 
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
+    "MARRIED": "marital_status",
     "AGE_RANGE": "age",
     "INCOME_RANGE": "income_raw",
     "PERSONAL_STATE": "state_raw",
     "NET_WORTH": "net_worth_raw",
     "CHILDREN": "children",
-    "MARRIED": "marital_status",
     "HOMEOWNER": "homeowner",
     "SKIPTRACE_CREDIT_RATING": "credit_raw"
 }
@@ -61,26 +61,26 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# SIMPLIFIED LABELING LOGIC
+# 🚨 DETAILED BUCKETING LOGIC 🚨
 def bucket_income(val):
     v = str(val).lower()
-    if any(x in v for x in ['250', '500']): return "High"
-    if any(x in v for x in ['125', '150', '175', '200']): return "Medium-High"
-    if any(x in v for x in ['50', '75', '100']): return "Medium"
-    return "Low"
+    if any(x in v for x in ['250', '500']): return "High ($250k+)"
+    if any(x in v for x in ['125', '150', '175', '200']): return "Med-High ($125k-$249k)"
+    if any(x in v for x in ['50', '75', '100']): return "Medium ($50k-$124k)"
+    return "Low (Under $50k)"
 
 def bucket_nw(val):
     v = str(val).lower()
-    if any(x in v for x in ['1,000', '2,000', '5,000']): return "High"
-    if any(x in v for x in ['250', '500']): return "Medium-High"
-    if any(x in v for x in ['50', '100']): return "Medium"
-    return "Low"
+    if any(x in v for x in ['1,000', '2,000', '5,000']): return "High ($1M+)"
+    if any(x in v for x in ['250', '500']): return "Med-High ($250k-$999k)"
+    if any(x in v for x in ['50', '100']): return "Medium ($50k-$249k)"
+    return "Low (Under $50k)"
 
 def bucket_credit(val):
     v = str(val).upper().strip()
-    if v in ['A', 'B', 'C']: return "High"
-    if v in ['D', 'E']: return "Medium"
-    if v in ['F', 'G']: return "Low"
+    if v in ['A', 'B', 'C']: return "High (A, B, C)"
+    if v in ['D', 'E']: return "Medium (D, E)"
+    if v in ['F', 'G']: return "Low (F, G)"
     return "Unknown"
 
 @st.cache_data(ttl=3600) 
@@ -89,23 +89,27 @@ def load_master_graph():
     try:
         df = pd.read_csv("s3://leadnav-demo-data/master_data.csv", storage_options=aws_keys, low_memory=False)
         df.columns = [c.lower() for c in df.columns]
+        df = df.reset_index(drop=True)
         
-        # 1. Map Columns
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
         
-        # 2. Apply Transformations
+        # Mapping Logic
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
         if 'income_raw' in df.columns: df['income'] = df['income_raw'].apply(bucket_income)
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
         
-        # 3. Handle Multi-Email Explosion
+        # Gender & Marital Logic
+        if 'gender' in df.columns:
+            df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
+        if 'marital_status' in df.columns:
+            df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
+        
+        # Explosion Fix
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
         df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
-        
-        # 🚨 THE CRITICAL FIX: Reset index immediately after explode to kill duplicate labels
         df = df.explode('Email').reset_index(drop=True)
         df['Email'] = df['Email'].str.strip()
         
@@ -122,10 +126,7 @@ if st.session_state.app_state == "onboarding":
         with st.spinner("Analyzing Identity Graph..."):
             df_master = load_master_graph()
             df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
-            
-            # 🚨 MERGE PROTECTION: Ensure both sides have unique indices
             df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
-            
             if not df_joined.empty:
                 st.session_state.df_icp = df_joined
                 st.session_state.app_state = "dashboard"
@@ -143,9 +144,15 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # 🚨 UPDATED VARIABLE ORDER 🚨
     configs = [
-        ("Credit Rating", "credit_rating"), ("Household Income", "income"), ("Net Worth", "net_worth"), 
-        ("Regional Footprint", "region"), ("Age Range", "age"), ("Gender", "gender"), ("Marital Status", "marital_status")
+        ("Gender", "gender"), 
+        ("Marital Status", "marital_status"), 
+        ("Credit Rating", "credit_rating"), 
+        ("Household Income", "income"), 
+        ("Net Worth", "net_worth"), 
+        ("Geographic Region", "region"), 
+        ("Age Range", "age")
     ]
 
     for label, col in configs:
@@ -156,14 +163,27 @@ elif st.session_state.app_state == "dashboard":
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
                 
+                # 🏷️ REGIONAL MAP BACK IN
+                if col == "region":
+                    with st.expander("📍 View Regional Identity Map"):
+                        st.write("**Northeast:** CT, MA, ME, NH, NJ, NY, PA, RI, VT")
+                        st.write("**Midwest:** IA, IL, IN, KS, MI, MN, MO, ND, NE, OH, SD, WI")
+                        st.write("**South:** AL, AR, DC, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV")
+                        st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
+
+                # --- CLEAN TOOLTIP CHART ---
                 chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
                     theta="Revenue:Q",
                     color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
-                    tooltip=[col, alt.Tooltip('Revenue', format='$,.0f')]
+                    tooltip=[
+                        alt.Tooltip(f'{col}:N', title=label), 
+                        alt.Tooltip('Revenue:Q', format='$,.0f')
+                    ]
                 ).properties(width=700, height=450)
                 
                 st.altair_chart(chart, use_container_width=False)
                 
+                # --- SYNCED TABLE ---
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
