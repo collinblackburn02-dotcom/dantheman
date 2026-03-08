@@ -28,14 +28,15 @@ STATE_TO_REGION = {
 
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Audience Engine", page_icon="🧬", layout="wide")
 
-# 🚨 DEFINED AT TOP LEVEL TO PREVENT YOUR ERROR
+# --- 🚨 MODAL LOGIC (STABLE TRIGGER) ---
 @st.dialog("🔒 Secure Access Required")
 def login_modal():
     st.write("Please enter the password to view the complete Customer DNA profile.")
     pwd = st.text_input("Password", type="password")
-    if st.button("Unlock Dashboard", use_container_width=True):
+    if st.button("Unlock Dashboard", use_container_width=True, kind="primary"):
         if pwd == DEMO_PASSWORD:
             st.session_state.is_unlocked = True
+            st.session_state.show_login = False # Close trigger
             st.rerun()
         else:
             st.error("Incorrect Password")
@@ -89,6 +90,7 @@ def load_master_graph():
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
+        
         if 'zip_code' in df.columns:
             df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
             df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
@@ -103,6 +105,11 @@ def load_master_graph():
 # ================ 3. DASHBOARD =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "is_unlocked" not in st.session_state: st.session_state.is_unlocked = False
+if "show_login" not in st.session_state: st.session_state.show_login = False
+
+# 🚨 RUN MODAL IF TRIGGERED
+if st.session_state.show_login:
+    login_modal()
 
 if st.session_state.app_state == "onboarding":
     st.markdown("<h1 style='text-align: center; font-size: 3rem; margin-top: 50px;'>🎯 Audience Engine</h1>", unsafe_allow_html=True)
@@ -122,10 +129,13 @@ if st.session_state.app_state == "onboarding":
                     st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    # 🚨 POP-UP SECURITY TRIGGER 🚨
+    # Selection Controls
     c1, c2, _ = st.columns([1, 1, 4])
     if not st.session_state.is_unlocked:
-        if c1.button("🔑 Unlock Full Profile", kind="primary"): login_modal()
+        # 🚨 TRIGGER TOGGLE (PREVENTS YOUR ERROR)
+        if c1.button("🔑 Unlock Full Profile", kind="primary"): 
+            st.session_state.show_login = True
+            st.rerun()
     else:
         st.success("✅ Full Profile Unlocked")
         
@@ -138,12 +148,13 @@ elif st.session_state.app_state == "dashboard":
     df_p = full_df if st.session_state.is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # KPIs and Summary
+    # 1. MACRO METRICS
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # 2. TOP PERFORMING DEMOGRAPHICS
     st.markdown("### 🏆 Top Performing Demographics")
     total_rev = df_p['revenue_raw'].sum()
     summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
@@ -159,7 +170,8 @@ elif st.session_state.app_state == "dashboard":
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Deep Dive and Tables
+    # 3. SINGLE VARIABLE DEEP DIVE
+    st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
     if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
@@ -192,9 +204,9 @@ elif st.session_state.app_state == "dashboard":
             display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
             render_premium_table(display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green))
 
+            # Heatmap Expander
             if st.session_state.active_var == "Location":
-                with st.expander(f"🗺️ View {display_label} Revenue Heatmap", expanded=True):
-                    # Heatmap Chart Logic
+                with st.expander(f"🗺️ View {display_label} Revenue Analysis", expanded=True):
                     chart_col = display_label.upper()
                     if st.session_state.active_loc_level in ["State", "Region"]:
                         chart = alt.Chart(display_df).mark_bar().encode(
