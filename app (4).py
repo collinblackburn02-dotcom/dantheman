@@ -28,19 +28,6 @@ STATE_TO_REGION = {
 
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Audience Engine", page_icon="🧬", layout="wide")
 
-# --- 🚨 TOP-LEVEL MODAL DEFINITION ---
-@st.dialog("🔒 Secure Access Required")
-def login_modal():
-    st.write("Please enter the password to view the complete Customer DNA profile.")
-    pwd = st.text_input("Password", type="password", key="login_pwd_input")
-    if st.button("Unlock Dashboard", use_container_width=True, kind="primary"):
-        if pwd == DEMO_PASSWORD:
-            st.session_state.is_unlocked = True
-            st.session_state.show_login = False
-            st.rerun()
-        else:
-            st.error("Incorrect Password")
-
 def apply_custom_theme(primary_color):
     st.markdown(f"""
         <style>
@@ -50,7 +37,6 @@ def apply_custom_theme(primary_color):
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
-            div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
             [data-testid="stMetricDelta"] {{ color: #09AB3B !important; }}
             [data-testid="stMetricDelta"] svg {{ display: none; }} 
@@ -64,9 +50,6 @@ def apply_custom_theme(primary_color):
 
 apply_custom_theme(PITCH_BRAND_COLOR)
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
-
-def render_premium_table(styler_obj):
-    st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
 # ================ 2. DATA ENGINE =================
 @st.cache_data(ttl=3600) 
@@ -90,7 +73,6 @@ def load_master_graph():
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
-        
         if 'zip_code' in df.columns:
             df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
             df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
@@ -102,10 +84,10 @@ def load_master_graph():
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
 
-# ================ 3. APP STATE INITIALIZATION =================
+# ================ 3. APP STATE =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "is_unlocked" not in st.session_state: st.session_state.is_unlocked = False
-if "show_login" not in st.session_state: st.session_state.show_login = False
+if "prompt_pwd" not in st.session_state: st.session_state.prompt_pwd = False
 
 # ================ 4. ONBOARDING =================
 if st.session_state.app_state == "onboarding":
@@ -128,16 +110,21 @@ if st.session_state.app_state == "onboarding":
 # ================ 5. DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
     
-    # 🚨 1. HIGHEST LEVEL MODAL CHECK (SITS ABOVE EVERYTHING)
-    if st.session_state.show_login:
-        login_modal()
-
-    # 2. SELECTION BAR
+    # 🚨 FIXED LOCK LOGIC (NO ST.DIALOG)
     c1, c2, _ = st.columns([1, 1, 4])
     if not st.session_state.is_unlocked:
         if c1.button("🔑 Unlock Full Profile", kind="primary"): 
-            st.session_state.show_login = True
-            st.rerun()
+            st.session_state.prompt_pwd = not st.session_state.prompt_pwd
+            
+        if st.session_state.prompt_pwd:
+            with st.container(border=True):
+                pwd = st.text_input("Enter Dashboard Password", type="password")
+                if st.button("Submit Password"):
+                    if pwd == DEMO_PASSWORD:
+                        st.session_state.is_unlocked = True
+                        st.session_state.prompt_pwd = False
+                        st.rerun()
+                    else: st.error("Wrong password.")
     else:
         st.success("✅ Full Profile Unlocked")
         
@@ -150,13 +137,11 @@ elif st.session_state.app_state == "dashboard":
     df_p = full_df if st.session_state.is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # 3. MACRO METRICS
+    # KPIs, Summary, and Table logic follows...
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 4. TOP PERFORMING DEMOGRAPHICS
+    
     st.markdown("### 🏆 Top Performing Demographics")
     total_rev = df_p['revenue_raw'].sum()
     summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
@@ -171,8 +156,6 @@ elif st.session_state.app_state == "dashboard":
                 summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
 
     st.markdown("<hr>", unsafe_allow_html=True)
-
-    # 5. SINGLE VARIABLE DEEP DIVE
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
@@ -192,10 +175,7 @@ elif st.session_state.app_state == "dashboard":
         if l_col3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
         loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
         active_col = loc_map[st.session_state.active_loc_level]
-        display_label = st.session_state.active_loc_level
-    else:
-        active_col = dict(configs)[st.session_state.active_var]
-        display_label = st.session_state.active_var
+    else: active_col = dict(configs)[st.session_state.active_var]
 
     if active_col in df_p.columns:
         df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
@@ -203,23 +183,8 @@ elif st.session_state.app_state == "dashboard":
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
-            display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
-            render_premium_table(display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green))
-
-            # Heatmap Visuals
-            if st.session_state.active_var == "Location":
-                with st.expander(f"🗺️ View {display_label} Revenue Analysis", expanded=True):
-                    chart_col = display_label.upper()
-                    if st.session_state.active_loc_level in ["State", "Region"]:
-                        chart = alt.Chart(display_df).mark_bar().encode(
-                            x='Revenue:Q', y=alt.Y(f'{chart_col}:N', sort='-x'),
-                            color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens')),
-                            tooltip=[chart_col, alt.Tooltip('Revenue:Q', format='$,.0f')]
-                        ).properties(height=400)
-                    else:
-                        chart = alt.Chart(display_df.head(20)).mark_bar().encode(
-                            x=alt.X(f'{chart_col}:N', sort='-y'), y='Revenue:Q',
-                            color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens')),
-                            tooltip=[chart_col, alt.Tooltip('Revenue:Q', format='$,.0f')]
-                        ).properties(height=400)
-                    st.altair_chart(chart, use_container_width=True)
+            display_df = df_p_grp.rename(columns={active_col: st.session_state.active_var.upper() if st.session_state.active_var != "Location" else st.session_state.active_loc_level.upper()}).sort_values('Revenue', ascending=False)
+            
+            # Premium Table Formatting
+            styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
+            st.markdown(f'<div class="premium-table-container">{styler.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
