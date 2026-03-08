@@ -6,7 +6,7 @@ import altair as alt
 # ================ 1. CONFIGURATION =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#0A2540" 
-DEMO_PASSWORD = "leadnavai" # 🚨 YOUR PASSWORD
+DEMO_PASSWORD = "leadnavai"
 
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
@@ -73,7 +73,7 @@ def bucket_credit(val):
     if v in ['F', 'G']: return "Low (F, G)"
     return "Unknown"
 
-# ================ 2. AWS LOADING =================
+# ================ 2. AWS LOADER =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -86,6 +86,7 @@ def load_master_graph():
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             temp_df.columns = [c.upper().strip() for c in temp_df.columns]
             
+            # Use PERSONAL_EMAILS specifically
             if 'PERSONAL_EMAILS' in temp_df.columns:
                 temp_df = temp_df.rename(columns={'PERSONAL_EMAILS': 'email_match'})
             else:
@@ -128,16 +129,19 @@ if st.session_state.app_state == "onboarding":
         with st.spinner("Executing LeadNavigator Identity Resolution..."):
             df_master = load_master_graph()
             df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
+            
+            # Match ENTIRE file first to maximize matches
             df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
             
             if not df_joined.empty:
                 st.session_state.df_icp = df_joined
                 st.session_state.app_state = "dashboard"
                 st.rerun()
+            else:
+                st.error("⚠️ Zero matches found.")
 
 # ================ 4. DASHBOARD =================
 elif st.session_state.app_state == "dashboard":
-    # 🚨 SIDEBAR PASSWORD PROTECTION 🚨
     with st.sidebar:
         st.title("🔒 Security")
         pwd = st.text_input("Enter Dashboard Password", type="password")
@@ -150,7 +154,7 @@ elif st.session_state.app_state == "dashboard":
     st.markdown(f"## 🧬 Identity Match Result {'(Unlocked)' if is_unlocked else '(Restricted)'}")
     if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
     
-    # 🚨 CLIP DATA IF NOT UNLOCKED 🚨
+    # Clip only after matching is done
     full_df = st.session_state.df_icp
     df = full_df.head(100).copy() if not is_unlocked else full_df.copy()
 
