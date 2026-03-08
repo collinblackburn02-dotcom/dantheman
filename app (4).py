@@ -14,7 +14,7 @@ AWS_COLUMN_MAPPER = {
     "AGE_RANGE": "age",
     "INCOME_RANGE": "income",
     "PERSONAL_STATE": "state_raw",
-    "PERSONAL_ZIP": "zip_code", # 🚨 Updated to your confirmed header
+    "PERSONAL_ZIP": "zip_code", 
     "NET_WORTH": "net_worth",
     "SKIPTRACE_CREDIT_RATING": "credit_rating"
 }
@@ -56,7 +56,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# ================ 2. DATA ENGINE =================
+# ================ 2. AWS DATA ENGINE =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -72,11 +72,15 @@ def load_master_graph():
             e_col = 'PERSONAL_EMAILS' if 'PERSONAL_EMAILS' in temp_df.columns else temp_df.columns[0]
             temp_df = temp_df.rename(columns={e_col: 'email_match'})
             
-            # 🚨 ZIP CODE FAIL-SAFE
-            if 'PERSONAL_ZIP' not in temp_df.columns:
+            # 🚨 FORCE ZIP CODE FORMATTING
+            if 'PERSONAL_ZIP' in temp_df.columns:
+                temp_df['PERSONAL_ZIP'] = temp_df['PERSONAL_ZIP'].astype(str).str.split('.').str[0].str.zfill(5)
+            else:
+                # Fail-safe search
                 zip_guess = next((c for c in temp_df.columns if 'ZIP' in c), None)
                 if zip_guess:
                     temp_df = temp_df.rename(columns={zip_guess: 'PERSONAL_ZIP'})
+                    temp_df['PERSONAL_ZIP'] = temp_df['PERSONAL_ZIP'].astype(str).str.split('.').str[0].str.zfill(5)
             
             dataframes.append(temp_df)
             
@@ -93,7 +97,7 @@ def load_master_graph():
         df = df.explode('email_match').reset_index(drop=True)
         return df.drop_duplicates(subset=['email_match']).reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
+        st.error(f"🚨 AWS Error: {e}"); st.stop()
 
 # ================ 3. DASHBOARD =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
@@ -123,15 +127,10 @@ elif st.session_state.app_state == "dashboard":
         if is_unlocked:
             st.success("Full Access Granted")
             st.session_state.pres_mode = st.toggle("🎥 Presentation Mode", value=st.session_state.pres_mode)
-        if st.button("🔄 New Analysis"): 
-            st.session_state.app_state = "onboarding"
-            st.session_state.pres_mode = False
-            st.rerun()
+        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.session_state.pres_mode = False; st.rerun()
 
     if st.session_state.pres_mode:
-        if st.button("Exit Presentation Mode"): 
-            st.session_state.pres_mode = False
-            st.rerun()
+        if st.button("Exit Presentation Mode"): st.session_state.pres_mode = False; st.rerun()
 
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
@@ -159,8 +158,8 @@ elif st.session_state.app_state == "dashboard":
         active_col = dict(configs)[st.session_state.active_var]
         display_label = st.session_state.active_var
 
-    full_df = st.session_state.df_icp
-    df_p = full_df if is_unlocked else full_df.head(100).copy()
+    df_p_full = st.session_state.df_icp
+    df_p = df_p_full if is_unlocked else df_p_full.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
     m1, m2 = st.columns(2)
@@ -178,6 +177,5 @@ elif st.session_state.app_state == "dashboard":
             display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
             render_premium_table(styler)
-            st.download_button(f"📥 Download {display_label} Report", display_df.to_csv(index=False), f"LeadNavigator_{display_label}_Report.csv", "text/csv")
     else:
-        st.warning(f"⚠️ {display_label} data not found in matched profiles.")
+        st.warning(f"⚠️ {display_label} data not found in matched profiles. Check column headers in AWS.")
