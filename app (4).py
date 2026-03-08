@@ -6,6 +6,7 @@ import altair as alt
 # ================ 1. CONFIGURATION & THEME =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#B3845C" 
+DEMO_PASSWORD = "leadnavai"
 
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
@@ -87,7 +88,7 @@ def load_master_graph():
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
 
-# ================ 3. DASHBOARD =================
+# ================ 3. DASHBOARD FLOW =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 
 if st.session_state.app_state == "onboarding":
@@ -108,35 +109,93 @@ if st.session_state.app_state == "onboarding":
                     st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    if st.sidebar.button("🔄 New Analysis"): 
-        st.session_state.app_state = "onboarding"
-        st.rerun()
+    with st.sidebar:
+        st.title("🔒 Security")
+        pwd = st.text_input("Password", type="password")
+        is_unlocked = (pwd == DEMO_PASSWORD)
+        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.rerun()
 
-    df_p = st.session_state.df_icp
+    df_p = st.session_state.df_icp.copy()
+    if not is_unlocked:
+        df_p = df_p.head(100)
+    
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # KPIs, Summary, and Single Variable Deep Dive
-    # ... (omitted for brevity, assume this core dash logic is present)
+    # KPIs
+    m1, m2 = st.columns(2)
+    m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
+    m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # 🚨 DYNAMIC REVENUE HEATMAP & MULTI-LEVEL EXPLORER
-    # (Configs and Multi-level code from step 11 is integrated here)
+    # Top Performers
+    st.markdown("### 🏆 Top Performing Demographics")
+    total_rev = df_p['revenue_raw'].sum()
+    summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code")]
+    summary_cols = st.columns(len(summary_vars))
+    for idx, (label, col_key) in enumerate(summary_vars):
+        temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
+        if not temp.empty:
+            rev_series = temp.groupby(col_key)['revenue_raw'].sum()
+            winner = rev_series.idxmax()
+            rev_pct = (rev_series.max() / total_rev * 100) if total_rev > 0 else 0
+            summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
 
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # --- 🚨 FIXED VARIABLE LOGIC 🚨 ---
+    st.markdown("### 🔍 Single Variable Deep Dive")
+    configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
+    if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
+    if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region"
+    
+    var_cols = st.columns(len(configs))
+    for i, (label, col_name) in enumerate(configs):
+        if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_var == label else "secondary", use_container_width=True):
+            st.session_state.active_var = label
+            st.rerun()
+
+    # Define active_col and display_label BEFORE data processing
     if st.session_state.active_var == "Location":
         st.markdown("<br>", unsafe_allow_html=True)
         l1, l2, l3, _ = st.columns([1, 1, 1, 5])
-        # Location sub-buttons...
+        if l1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
+        if l2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
+        if l3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
+        
+        loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
+        active_col = loc_map[st.session_state.active_loc_level]
+        display_label = st.session_state.active_loc_level
+    else:
+        active_col = dict(configs)[st.session_state.active_var]
+        display_label = st.session_state.active_var
 
+    # --- Data Processing and Table ---
     if active_col in df_p.columns:
-        # Table generation, and...
-        # ...
+        df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
+        df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+        
+        if not df_p_grp.empty:
+            df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
+            df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
+            disp_name = display_label.upper()
+            display_df = df_p_grp.rename(columns={active_col: disp_name}).sort_values('Revenue', ascending=False)
+            
+            # Premium Table with Heat on Revenue
+            styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Revenue', '% of Buyers'], cmap=custom_light_green)
+            render_premium_table(styler)
 
-            if st.session_state.active_var == "Location":
-                with st.expander(f"🗺️ View {display_label} Revenue Analysis", expanded=True):
-                    heat_chart = alt.Chart(display_df.head(20)).mark_bar().encode(
-                        x=alt.X(f'{disp_label}:N', sort='-y', title=None),
-                        y=alt.Y('Revenue:Q', title="Attributed Sales ($)"),
-                        # 🚨 SHADING APPLIED TO REVENUE (DARK TO LIGHT)
-                        color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
-                        tooltip=[disp_label, alt.Tooltip('Revenue:Q', format='$,.0f')]
-                    ).properties(height=400, title=f"Top {display_label} Performers by Revenue")
-                    st.altair_chart(heat_chart, use_container_width=True)
+            # 🚨 PRETTY REVENUE CHART 🚨
+            with st.expander(f"🗺️ View {display_label} Revenue Analysis", expanded=True):
+                chart_df = display_df.head(15).copy()
+                
+                pretty_chart = alt.Chart(chart_df).mark_bar(
+                    cornerRadiusTopLeft=8, cornerRadiusTopRight=8, stroke="#E2D7C8", strokeWidth=1
+                ).encode(
+                    x=alt.X(f'{disp_name}:N', sort='-y', axis=alt.Axis(labelAngle=-45, title=None)),
+                    y=alt.Y('Revenue:Q', axis=alt.Axis(format='$,.0f', grid=True, title="Total Revenue")),
+                    # Dark green for high revenue, light for low
+                    color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens'), legend=None),
+                    tooltip=[disp_name, alt.Tooltip('Revenue:Q', format='$,.2f')]
+                ).configure_view(strokeOpacity=0).properties(height=400)
+                
+                st.altair_chart(pretty_chart, use_container_width=True)
