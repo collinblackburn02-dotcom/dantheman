@@ -33,7 +33,7 @@ STATE_TO_REGION = {
 
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Customer DNA", page_icon="🧬", layout="centered")
 
-# --- FIX: INITIALIZE SESSION STATE ---
+# INITIALIZE SESSION STATE
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
 if "df_icp" not in st.session_state: st.session_state.df_icp = None
 
@@ -56,7 +56,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# BUCKETING LOGIC HELPERS
+# BUCKETING HELPERS
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High Earner ($250k+)"
@@ -85,24 +85,17 @@ def load_master_graph():
     try:
         df = pd.read_csv("s3://leadnav-demo-data/master_data.csv", storage_options=aws_keys, low_memory=False)
         df.columns = [c.lower() for c in df.columns]
-        
-        # Mapping
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
         
-        # B2C Transformation
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
         if 'income_raw' in df.columns: df['income'] = df['income_raw'].apply(bucket_income)
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
         
-        # Email Explosion Fix
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
-        df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
-        df = df.explode('Email')
-        df['Email'] = df['Email'].str.strip()
-        
+        df['Email'] = df['Email'].astype(str).str.lower().str.split(',').explode().str.strip()
         return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
@@ -128,9 +121,12 @@ elif st.session_state.app_state == "dashboard":
     if st.button("← New Upload"): st.session_state.app_state = "onboarding"; st.rerun()
     
     df = st.session_state.df_icp
+    # Ensure Total is numeric immediately
+    df['Total'] = pd.to_numeric(df['Total'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+
     c1, c2 = st.columns(2)
     c1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
-    c2.metric("Attributed Sales", f"${pd.to_numeric(df['Total'], errors='coerce').sum():,.2f}")
+    c2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
 
     display_configs = [
         ("Credit Rating Score", "credit_rating"), ("Household Income", "income"), ("Net Worth Segment", "net_worth"), 
@@ -143,6 +139,9 @@ elif st.session_state.app_state == "dashboard":
             grp = df_plot.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
+                # --- FIX: FORCE REVENUE TO NUMERIC FOR MATH ---
+                grp['Revenue'] = pd.to_numeric(grp['Revenue'], errors='coerce').fillna(0)
+                
                 st.markdown(f"## {label}")
                 if col == "region":
                     with st.expander("📍 View Regional Identity Map"):
@@ -157,6 +156,8 @@ elif st.session_state.app_state == "dashboard":
                 ).properties(height=500)
                 st.altair_chart(chart, use_container_width=True)
                 
+                # Math for table
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
+                grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
-                render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%'}).background_gradient(subset=['% Share'], cmap=custom_light_green))
+                render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}))
