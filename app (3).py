@@ -37,8 +37,8 @@ def apply_custom_theme(primary_color):
                 color: #2D2421 !important; 
                 font-weight: 700 !important; 
                 text-align: center !important; 
-                padding-top: 2.5rem !important; 
-                margin-bottom: 1rem !important;
+                padding-top: 3rem !important; 
+                margin-bottom: 0.5rem !important;
             }}
             [data-testid="stMetric"] {{ 
                 background-color: #FFFFFF; 
@@ -56,9 +56,17 @@ def apply_custom_theme(primary_color):
                 max-width: 95%;
             }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
-            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; padding: 10px; text-transform: uppercase; font-size: 0.7rem; }}
             
-            /* 🚨 BOLD THE FIRST COLUMN (Variable Names) */
+            /* 🚨 CENTERED TABLE HEADERS */
+            .premium-table-container th {{ 
+                background-color: #F2EBE1 !important; 
+                color: #3A2A26 !important; 
+                padding: 10px; 
+                text-transform: uppercase; 
+                font-size: 0.7rem; 
+                text-align: center !important; 
+            }}
+            
             .premium-table-container td:first-child {{ 
                 font-weight: 700 !important; 
                 color: #2D2421;
@@ -184,7 +192,6 @@ elif st.session_state.app_state == "dashboard":
     with m2: st.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Variables to display
     configs = [
         ("Gender", "gender"), ("Marital Status", "marital_status"), 
         ("Age Range", "age"), ("Credit Rating", "credit_rating"), 
@@ -204,15 +211,15 @@ elif st.session_state.app_state == "dashboard":
                             grp = chart_data.groupby(col_key).agg(Buyers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
                             st.markdown(f"<h3>{label}</h3>", unsafe_allow_html=True)
                             
+                            # 🚨 ADDED PADDING TO PIE CHART TOP
                             chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                                 theta=alt.Theta("Revenue:Q"), 
                                 color=alt.Color(f"{col_key}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", labelFontSize=14, labelLimit=240, columns=2)),
                                 tooltip=[alt.Tooltip(f'{col_key}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
-                            ).properties(height=450, width="container")
+                            ).configure_view(padding=40).properties(height=450, width="container")
+                            
                             st.altair_chart(chart, use_container_width=True)
                             
                             grp['%'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                             grp = grp.sort_values('Revenue', ascending=False).rename(columns={col_key: label})
-                            
-                            # Standard table rendering
                             render_premium_table(grp[[label, 'Buyers', 'Revenue', '%']].style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.0f}', '%': '{:.0f}%'}).background_gradient(subset=['%'], cmap=custom_light_green))
