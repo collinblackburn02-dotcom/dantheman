@@ -54,22 +54,30 @@ configs = [("Gender", "gender"), ("Age", "age"), ("Income", "income"), ("Region"
 def load_master_graph():
     """Reads your live master list directly from AWS S3."""
     
+    # Now explicitly pointing to Ohio!
+    YOUR_AWS_REGION = "us-east-2" 
+    
     aws_keys = {
         "key": st.secrets["aws"]["access_key"],
-        "secret": st.secrets["aws"]["secret_key"]
+        "secret": st.secrets["aws"]["secret_key"],
+        "client_kwargs": {"region_name": YOUR_AWS_REGION} 
     }
     
-    # Updated to the clean file name!
     s3_file_path = "s3://leadnav-demo-data/master_data.csv"
     
-    # Read directly from AWS into memory
-    df_master = pd.read_csv(s3_file_path, storage_options=aws_keys, low_memory=False)
-    
-    if 'Email' in df_master.columns:
-        df_master['Email'] = df_master['Email'].astype(str).str.lower().str.strip()
+    try:
+        # Read directly from AWS into memory
+        df_master = pd.read_csv(s3_file_path, storage_options=aws_keys, low_memory=False)
         
-    return df_master
-
+        if 'Email' in df_master.columns:
+            df_master['Email'] = df_master['Email'].astype(str).str.lower().str.strip()
+            
+        return df_master
+        
+    except Exception as e:
+        # If anything goes wrong, this will print the REAL AWS error on your dashboard!
+        st.error(f"🚨 **AWS Connection Error:** {str(e)}")
+        st.stop()
 # ================ 3. STATE 1: ONBOARDING SCREEN =================
 if st.session_state.app_state == "onboarding":
     
