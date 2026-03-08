@@ -39,7 +39,11 @@ def apply_custom_theme(primary_color, is_pres_mode):
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
-            [data-testid="stMetricDelta"] svg {{ display: none; }} /* 🚨 Hides the delta arrow */
+            
+            /* 🚨 Restore Green Delta Text and Hide Arrows */
+            [data-testid="stMetricDelta"] {{ color: #09AB3B !important; }}
+            [data-testid="stMetricDelta"] svg {{ display: none; }} 
+            
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -130,23 +134,33 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 🚨 2. EXECUTIVE SUMMARY: TOP PERFORMERS
-    st.markdown("### 🏆 Executive Summary")
-    summary_cols = st.columns(5)
-    core_vars = [("Gender", "gender"), ("Age", "age"), ("Region", "region"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
+    # 🚨 2. TOP PERFORMING DEMOGRAPHICS (Renamed and Green Deltas)
+    st.markdown("### 🏆 Top Performing Demographics")
     
     total_revenue_overall = df_p['revenue_raw'].sum()
+    
+    # Expanded list for the summary
+    summary_vars = [
+        ("Gender", "gender"), 
+        ("Age", "age"), 
+        ("State", "state_raw"), 
+        ("Zip Code", "zip_code"),
+        ("Credit Rating", "credit_rating")
+    ]
+    
+    summary_cols = st.columns(len(summary_vars))
 
-    for idx, (label, col_key) in enumerate(core_vars):
+    for idx, (label, col_key) in enumerate(summary_vars):
         if col_key in df_p.columns:
             temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
             if not temp.empty:
                 rev_series = temp.groupby(col_key)['revenue_raw'].sum()
                 winner = rev_series.idxmax()
                 rev_val = rev_series.max()
-                rev_pct = (rev_val / total_revenue_overall) * 100 # 🚨 Accounts for % of revenue
+                rev_pct = (rev_val / total_revenue_overall) * 100 
                 
-                summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue", delta_color="off")
+                # Render the metric
+                summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -184,6 +198,10 @@ elif st.session_state.app_state == "dashboard":
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
+            
+            display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
+            styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
+            render_premium_table(styler)
             
             display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
