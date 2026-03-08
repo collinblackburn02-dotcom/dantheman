@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.colors as mcolors
-import altair as alt
 
 # ================ 1. CONFIGURATION & THEME =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
@@ -35,11 +34,17 @@ def apply_custom_theme(primary_color):
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
+            
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
+            div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
+            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; text-align: center; }}
+            
+            /* Green Delta Text (Share of Revenue) and Hide Arrows */
             [data-testid="stMetricDelta"] {{ color: #09AB3B !important; }}
             [data-testid="stMetricDelta"] svg {{ display: none; }} 
+            
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
             .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
@@ -50,6 +55,9 @@ def apply_custom_theme(primary_color):
 
 apply_custom_theme(PITCH_BRAND_COLOR)
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
+
+def render_premium_table(styler_obj):
+    st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
 # ================ 2. DATA ENGINE =================
 @st.cache_data(ttl=3600) 
@@ -65,28 +73,29 @@ def load_master_graph():
             e_col = 'PERSONAL_EMAILS' if 'PERSONAL_EMAILS' in temp_df.columns else temp_df.columns[0]
             temp_df = temp_df.rename(columns={e_col: 'email_match'})
             dataframes.append(temp_df)
+            
         df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
         df = df.rename(columns=AWS_COLUMN_MAPPER)
         df.columns = [c.lower() for c in df.columns]
+        
         if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Unknown')
         if 'gender' in df.columns: df['gender'] = df['gender'].map({'M': 'Male', 'F': 'Female'}).fillna('Unknown')
         if 'marital_status' in df.columns: df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
+        
         if 'zip_code' in df.columns:
             df['zip_code'] = df['zip_code'].astype(str).str.replace(r'\.0$', '', regex=True)
             df.loc[df['zip_code'].str.lower().isin(['nan', 'none', '', 'unknown']), 'zip_code'] = None
             df['zip_code'] = df['zip_code'].str.zfill(5)
+        
         df['email_match'] = df['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email_match').reset_index(drop=True)
         return df.drop_duplicates(subset=['email_match']).reset_index(drop=True)
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
 
-# ================ 3. INITIALIZATION =================
+# ================ 3. DASHBOARD =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
-if "is_unlocked" not in st.session_state: st.session_state.is_unlocked = False
-if "prompt_pwd" not in st.session_state: st.session_state.prompt_pwd = False
 
-# ================ 4. APP FLOW =================
 if st.session_state.app_state == "onboarding":
     st.markdown("<h1 style='text-align: center; font-size: 3rem; margin-top: 50px;'>🎯 Audience Engine</h1>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 2, 1])
@@ -105,56 +114,55 @@ if st.session_state.app_state == "onboarding":
                     st.rerun()
 
 elif st.session_state.app_state == "dashboard":
-    # 🚨 STABLE LOCK LOGIC (State-based, non-nested)
-    ctrl_col1, ctrl_col2, _ = st.columns([1, 1, 4])
-    
-    if not st.session_state.is_unlocked:
-        if ctrl_col1.button("🔑 Unlock Full Profile", kind="primary"): 
-            st.session_state.prompt_pwd = True
-    else:
-        st.success("✅ Full Profile Unlocked")
-        
-    if ctrl_col2.button("🔄 New Analysis"): 
-        st.session_state.app_state = "onboarding"
-        st.session_state.is_unlocked = False
-        st.session_state.prompt_pwd = False
-        st.rerun()
+    with st.sidebar:
+        st.title("🔒 Security")
+        pwd = st.text_input("Password", type="password")
+        is_unlocked = (pwd == DEMO_PASSWORD)
+        if is_unlocked: st.success("Full Access Granted")
+        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.rerun()
 
-    if st.session_state.prompt_pwd and not st.session_state.is_unlocked:
-        with st.container(border=True):
-            pwd_entry = st.text_input("Enter Dashboard Password", type="password")
-            if st.button("Submit Password"):
-                if pwd_entry == DEMO_PASSWORD:
-                    st.session_state.is_unlocked = True
-                    st.session_state.prompt_pwd = False
-                    st.rerun()
-                else:
-                    st.error("Incorrect Password")
-
-    # --- Data Processing ---
     full_df = st.session_state.df_icp
-    df_p = full_df if st.session_state.is_unlocked else full_df.head(100).copy()
+    df_p = full_df if is_unlocked else full_df.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # --- UI Components ---
+    # 1. MACRO METRICS
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
-    
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 2. TOP PERFORMING DEMOGRAPHICS (Full Leaderboard)
     st.markdown("### 🏆 Top Performing Demographics")
-    total_rev = df_p['revenue_raw'].sum()
-    summary_vars = [("Gender", "gender"), ("Age", "age"), ("Marital Status", "marital_status"), ("Region", "region"), ("State", "state_raw"), ("Zip Code", "zip_code"), ("Credit Rating", "credit_rating")]
+    
+    total_revenue_overall = df_p['revenue_raw'].sum()
+    
+    # Complete list for the summary blocks
+    summary_vars = [
+        ("Gender", "gender"), 
+        ("Age", "age"), 
+        ("Marital Status", "marital_status"),
+        ("Region", "region"),
+        ("State", "state_raw"), 
+        ("Zip Code", "zip_code"),
+        ("Credit Rating", "credit_rating")
+    ]
+    
     summary_cols = st.columns(len(summary_vars))
+
     for idx, (label, col_key) in enumerate(summary_vars):
         if col_key in df_p.columns:
             temp = df_p[~df_p[col_key].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
             if not temp.empty:
                 rev_series = temp.groupby(col_key)['revenue_raw'].sum()
                 winner = rev_series.idxmax()
-                rev_pct = (rev_series.max() / total_rev * 100) if total_rev > 0 else 0
+                rev_val = rev_series.max()
+                rev_pct = (rev_val / total_revenue_overall) * 100 if total_revenue_overall > 0 else 0
+                
                 summary_cols[idx].metric(label, winner, f"{rev_pct:.1f}% of Revenue")
 
     st.markdown("<hr>", unsafe_allow_html=True)
+
+    # 3. SINGLE VARIABLE DEEP DIVE
     st.markdown("### 🔍 Single Variable Deep Dive")
     configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     
@@ -169,32 +177,26 @@ elif st.session_state.app_state == "dashboard":
 
     if st.session_state.active_var == "Location":
         st.markdown("<br>", unsafe_allow_html=True)
-        l1, l2, l3, _ = st.columns([1, 1, 1, 5])
-        if l1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
-        if l2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
-        if l3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
+        l_col1, l_col2, l_col3, _ = st.columns([1, 1, 1, 5])
+        if l_col1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
+        if l_col2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
+        if l_col3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
+        
         loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
         active_col = loc_map[st.session_state.active_loc_level]
-    else: active_col = dict(configs)[st.session_state.active_var]
+        display_label = st.session_state.active_loc_level
+    else:
+        active_col = dict(configs)[st.session_state.active_var]
+        display_label = st.session_state.active_var
 
     if active_col in df_p.columns:
         df_clean = df_p[~df_p[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none', '00nan'])]
         df_p_grp = df_clean.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+        
         if not df_p_grp.empty:
             df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
             df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
-            disp_label = st.session_state.active_var.upper() if st.session_state.active_var != "Location" else st.session_state.active_loc_level.upper()
-            display_df = df_p_grp.rename(columns={active_col: disp_label}).sort_values('Revenue', ascending=False)
             
+            display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
             styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
-            st.markdown(f'<div class="premium-table-container">{styler.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
-
-            if st.session_state.active_var == "Location":
-                with st.expander(f"🗺️ View {st.session_state.active_loc_level} Revenue Analysis", expanded=True):
-                    # Simple bar chart instead of a pop-up to avoid crashes
-                    chart = alt.Chart(display_df.head(20)).mark_bar().encode(
-                        x=alt.X(f'{disp_label}:N', sort='-y'), y='Revenue:Q',
-                        color=alt.Color('Revenue:Q', scale=alt.Scale(scheme='greens')),
-                        tooltip=[disp_label, alt.Tooltip('Revenue:Q', format='$,.0f')]
-                    ).properties(height=400)
-                    st.altair_chart(chart, use_container_width=True)
+            render_premium_table(styler)
