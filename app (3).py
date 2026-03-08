@@ -41,7 +41,6 @@ def apply_custom_theme(primary_color):
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 700 !important; }}
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; }}
             
-            /* Locked width for Table and Chart Sync */
             .premium-table-container {{ 
                 width: 700px !important; 
                 margin: 0 auto 5rem auto; 
@@ -62,7 +61,7 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# 🚨 UPDATED SIMPLIFIED LABELING LOGIC 🚨
+# SIMPLIFIED LABELING LOGIC
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High"
@@ -90,19 +89,26 @@ def load_master_graph():
     try:
         df = pd.read_csv("s3://leadnav-demo-data/master_data.csv", storage_options=aws_keys, low_memory=False)
         df.columns = [c.lower() for c in df.columns]
-        df = df.reset_index(drop=True)
+        
+        # 1. Map Columns
         rename_dict = {k.lower(): v for k, v in AWS_COLUMN_MAPPER.items()}
         df = df.rename(columns=rename_dict)
-        if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
         
-        # Applying the simplified labeling
+        # 2. Apply Transformations
+        if 'state_raw' in df.columns: df['region'] = df['state_raw'].str.strip().str.upper().map(STATE_TO_REGION)
         if 'income_raw' in df.columns: df['income'] = df['income_raw'].apply(bucket_income)
         if 'net_worth_raw' in df.columns: df['net_worth'] = df['net_worth_raw'].apply(bucket_nw)
         if 'credit_raw' in df.columns: df['credit_rating'] = df['credit_raw'].apply(bucket_credit)
         
+        # 3. Handle Multi-Email Explosion
         email_col = next((c for c in df.columns if 'email' in c.lower()), 'Email')
         df = df.rename(columns={email_col: 'Email'})
-        df['Email'] = df['Email'].astype(str).str.lower().str.split(',').explode().str.strip()
+        df['Email'] = df['Email'].astype(str).str.lower().str.split(',')
+        
+        # 🚨 THE CRITICAL FIX: Reset index immediately after explode to kill duplicate labels
+        df = df.explode('Email').reset_index(drop=True)
+        df['Email'] = df['Email'].str.strip()
+        
         return df.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
     except Exception as e:
         st.error(f"🚨 AWS Error: {e}"); st.stop()
@@ -116,7 +122,10 @@ if st.session_state.app_state == "onboarding":
         with st.spinner("Analyzing Identity Graph..."):
             df_master = load_master_graph()
             df_orders['Email'] = df_orders['Email'].astype(str).str.lower().str.strip()
+            
+            # 🚨 MERGE PROTECTION: Ensure both sides have unique indices
             df_joined = pd.merge(df_orders, df_master, on='Email', how='inner').reset_index(drop=True)
+            
             if not df_joined.empty:
                 st.session_state.df_icp = df_joined
                 st.session_state.app_state = "dashboard"
@@ -134,7 +143,6 @@ elif st.session_state.app_state == "dashboard":
     m2.metric("Attributed Sales", f"${df['Total'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # LOOP THROUGH B2C VARIABLES
     configs = [
         ("Credit Rating", "credit_rating"), ("Household Income", "income"), ("Net Worth", "net_worth"), 
         ("Regional Footprint", "region"), ("Age Range", "age"), ("Gender", "gender"), ("Marital Status", "marital_status")
@@ -142,23 +150,20 @@ elif st.session_state.app_state == "dashboard":
 
     for label, col in configs:
         if col in df.columns:
-            # Filter unknowns and group
             df_plot = df[~df[col].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', '', 'other'])]
             grp = df_plot.groupby(col).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
                 st.markdown(f"<h2 style='text-align: center; margin-bottom: 2rem;'>{label} Distribution</h2>", unsafe_allow_html=True)
                 
-                # --- SYNCED PIE CHART WITH RIGHT-ALIGNED LEGEND ---
-                chart = alt.Chart(grp).mark_arc(innerRadius=80, stroke="#fff").encode(
+                chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
                     theta="Revenue:Q",
                     color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
                     tooltip=[col, alt.Tooltip('Revenue', format='$,.0f')]
-                ).properties(width=700, height=400)
+                ).properties(width=700, height=450)
                 
                 st.altair_chart(chart, use_container_width=False)
                 
-                # --- SYNCED TABLE WITH GREEN GRADIENT ---
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
