@@ -4,16 +4,16 @@ import matplotlib.colors as mcolors
 
 # ================ 1. CONFIGURATION & THEME =================
 PITCH_COMPANY_NAME = "LeadNavigator" 
-PITCH_BRAND_COLOR = "#B3845C" # Premium Tan
+PITCH_BRAND_COLOR = "#B3845C" 
 DEMO_PASSWORD = "leadnavai"
 
-# Hardcoded AWS headers
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
     "AGE_RANGE": "age",
     "INCOME_RANGE": "income",
     "PERSONAL_STATE": "state_raw",
+    "PERSONAL_ZIP": "zip_code", # 🚨 Added for hyper-local tracking
     "NET_WORTH": "net_worth",
     "SKIPTRACE_CREDIT_RATING": "credit_rating"
 }
@@ -27,37 +27,35 @@ STATE_TO_REGION = {
 
 st.set_page_config(page_title=f"{PITCH_COMPANY_NAME} | Audience Engine", page_icon="🧬", layout="wide")
 
-def apply_custom_theme(primary_color):
+def apply_custom_theme(primary_color, is_pres_mode):
+    hide_style = """ [data-testid="stSidebar"] { display: none; } [data-testid="stHeader"] { display: none; } .block-container { padding-top: 2rem !important; } """ if is_pres_mode else ""
     st.markdown(f"""
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
             html, body, [class*="css"] {{ font-family: 'Outfit', sans-serif; }}
             .stApp {{ background-color: #F9F7F3; }}
             h1, h2, h3 {{ color: #2D2421 !important; font-weight: 600 !important; }}
-            
-            /* Selection Bar Buttons */
             div[data-testid="stButton"] button {{ border-radius: 8px; font-weight: 500; padding: 0px 10px !important; }}
             div[data-testid="stButton"] button[kind="primary"] {{ background-color: {primary_color} !important; color: #FFFFFF !important; border: none; }}
             div[data-testid="stButton"] button[kind="secondary"] {{ background-color: #FFFFFF; color: #2D2421; border: 1px solid #E2D7C8; }}
-            
             [data-testid="stMetric"] {{ background-color: #FFFFFF; border: 1px solid #E2D7C8; border-radius: 12px; padding: 20px; }}
-            
-            /* Premium Table Formatting */
             .premium-table-container {{ border-radius: 12px; border: 1px solid #E2D7C8; background: #FFFFFF; overflow: hidden; margin-top: 1rem; }}
             .premium-table-container table {{ width: 100% !important; border-collapse: collapse !important; }}
-            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; text-transform: uppercase !important; font-size: 0.75rem !important; border-bottom: 2px solid #D5C6B3 !important; }}
+            .premium-table-container th {{ background-color: #F2EBE1 !important; color: #3A2A26 !important; font-weight: 700 !important; text-align: center !important; padding: 12px !important; border-bottom: 2px solid #D5C6B3 !important; text-transform: uppercase !important; font-size: 0.75rem !important; }}
             .premium-table-container td {{ text-align: center !important; padding: 12px !important; border-bottom: 1px solid #F0EAD6 !important; font-size: 0.85rem !important; }}
             .premium-table-container td:first-child {{ font-weight: 700 !important; }}
+            {hide_style}
         </style>
     """, unsafe_allow_html=True)
 
-apply_custom_theme(PITCH_BRAND_COLOR)
+if "pres_mode" not in st.session_state: st.session_state.pres_mode = False
+apply_custom_theme(PITCH_BRAND_COLOR, st.session_state.pres_mode)
 custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", ["#F9F7F3", "#D1E5D1", "#6EAB6E"])
 
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# ================ 2. AWS DATA ENGINE =================
+# ================ 2. DATA ENGINE =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -81,10 +79,11 @@ def load_master_graph():
         df = df.explode('email_match').reset_index(drop=True)
         return df.drop_duplicates(subset=['email_match']).reset_index(drop=True)
     except Exception as e:
-        st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
+        st.error(f"🚨 AWS Error: {e}"); st.stop()
 
-# ================ 3. ONBOARDING =================
+# ================ 3. DASHBOARD =================
 if "app_state" not in st.session_state: st.session_state.app_state = "onboarding"
+
 if st.session_state.app_state == "onboarding":
     st.markdown("<h1 style='text-align: center; font-size: 3rem; margin-top: 50px;'>🎯 Audience Engine</h1>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 2, 1])
@@ -102,63 +101,66 @@ if st.session_state.app_state == "onboarding":
                     st.session_state.app_state = "dashboard"
                     st.rerun()
 
-# ================ 4. DASHBOARD (DEEP DIVE) =================
 elif st.session_state.app_state == "dashboard":
     with st.sidebar:
         st.title("🔒 Security")
         pwd = st.text_input("Password", type="password")
         is_unlocked = (pwd == DEMO_PASSWORD)
-        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.rerun()
+        if is_unlocked:
+            st.success("Full Access Granted")
+            st.session_state.pres_mode = st.toggle("🎥 Presentation Mode", value=st.session_state.pres_mode)
+        if st.button("🔄 New Analysis"): st.session_state.app_state = "onboarding"; st.session_state.pres_mode = False; st.rerun()
+
+    if st.session_state.pres_mode:
+        if st.button("Exit Presentation Mode"): st.session_state.pres_mode = False; st.rerun()
 
     st.markdown("### 🔍 Single Variable Deep Dive")
     
-    configs = [("Gender", "gender"), ("Age", "age"), ("Region", "region"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
+    # 🚨 UPDATED VARIABLE CONFIG: Location is the parent
+    configs = [("Gender", "gender"), ("Age", "age"), ("Location", "location"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating")]
     if "active_var" not in st.session_state: st.session_state.active_var = "Gender"
+    if "active_loc_level" not in st.session_state: st.session_state.active_loc_level = "Region" # Default sub-level
     
-    # 🚨 HORIZONTAL SELECTOR 🚨
     var_cols = st.columns(len(configs))
     for i, (label, col_name) in enumerate(configs):
         if var_cols[i].button(label, key=f"btn_{label}", type="primary" if st.session_state.active_var == label else "secondary", use_container_width=True):
             st.session_state.active_var = label
             st.rerun()
 
+    # 🚨 SUB-NAVIGATION FOR LOCATION
     active_label = st.session_state.active_var
-    active_col = dict(configs)[active_label]
-
-    # Data Clipping
-    full_p = st.session_state.df_icp
-    if not is_unlocked:
-        top_100_ids = full_p['Order ID'].unique()[:100]
-        df_p = full_p[full_p['Order ID'].isin(top_100_ids)].copy()
+    if active_label == "Location":
+        st.markdown("<br>", unsafe_allow_html=True)
+        l_col1, l_col2, l_col3, _ = st.columns([1, 1, 1, 5])
+        if l_col1.button("Region", type="primary" if st.session_state.active_loc_level == "Region" else "secondary"): st.session_state.active_loc_level = "Region"; st.rerun()
+        if l_col2.button("State", type="primary" if st.session_state.active_loc_level == "State" else "secondary"): st.session_state.active_loc_level = "State"; st.rerun()
+        if l_col3.button("Zip Code", type="primary" if st.session_state.active_loc_level == "Zip Code" else "secondary"): st.session_state.active_loc_level = "Zip Code"; st.rerun()
+        
+        # Map sub-selection to actual column
+        loc_map = {"Region": "region", "State": "state_raw", "Zip Code": "zip_code"}
+        active_col = loc_map[st.session_state.active_loc_level]
+        display_label = st.session_state.active_loc_level
     else:
-        df_p = full_p.copy()
+        active_col = dict(configs)[active_label]
+        display_label = active_label
 
+    df_p_full = st.session_state.df_icp
+    df_p = df_p_full if is_unlocked else df_p_full.head(100).copy()
     df_p['revenue_raw'] = pd.to_numeric(df_p['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df_p['Order ID'].nunique():,.0f}")
     m2.metric("Attributed Sales", f"${df_p['revenue_raw'].sum():,.2f}")
 
-    # 🚨 UPDATED MATH: Revenue per Purchaser (AOV) only
-    df_p_grp = df_p.groupby(active_col).agg(
-        Purchasers=('Order ID', 'nunique'), 
-        Revenue=('revenue_raw', 'sum')
-    ).reset_index()
-    
-    df_p_grp = df_p_grp[~df_p_grp[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'other', 'u'])]
+    # Process and display table
+    df_p_grp = df_p.groupby(active_col).agg(Purchasers=('Order ID', 'nunique'), Revenue=('revenue_raw', 'sum')).reset_index()
+    df_p_grp = df_p_grp[~df_p_grp[active_col].astype(str).str.lower().isin(['unknown', 'nan', 'u', 'none'])]
     
     if not df_p_grp.empty:
         df_p_grp['% of Buyers'] = (df_p_grp['Purchasers'] / df_p_grp['Purchasers'].sum()) * 100
         df_p_grp['Rev / Purchaser'] = (df_p_grp['Revenue'] / df_p_grp['Purchasers'])
         
-        display_df = df_p_grp.rename(columns={active_col: active_label.upper()}).sort_values('Revenue', ascending=False)
-        
-        # Premium Table Styles
-        styler = display_df.style.format({
-            'Purchasers': '{:,.0f}', 
-            'Revenue': '${:,.2f}', 
-            '% of Buyers': '{:.1f}%',
-            'Rev / Purchaser': '${:,.2f}'
-        }).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
-        
+        display_df = df_p_grp.rename(columns={active_col: display_label.upper()}).sort_values('Revenue', ascending=False)
+        styler = display_df.style.format({'Purchasers': '{:,.0f}', 'Revenue': '${:,.2f}', '% of Buyers': '{:.1f}%', 'Rev / Purchaser': '${:,.2f}'}).background_gradient(subset=['Rev / Purchaser', '% of Buyers'], cmap=custom_light_green)
         render_premium_table(styler)
+        st.download_button(f"📥 Download {display_label} Report", display_df.to_csv(index=False), f"LeadNavigator_{display_label}_Report.csv", "text/csv")
