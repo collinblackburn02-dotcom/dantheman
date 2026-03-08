@@ -7,7 +7,7 @@ import altair as alt
 PITCH_COMPANY_NAME = "LeadNavigator" 
 PITCH_BRAND_COLOR = "#0A2540" 
 
-# Mapping raw headers to clean internal labels
+# These are your EXACT AWS headers
 AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "MARRIED": "marital_status",
@@ -51,7 +51,6 @@ custom_light_green = mcolors.LinearSegmentedColormap.from_list("custom_green", [
 def render_premium_table(styler_obj):
     st.markdown(f'<div class="premium-table-container">{styler_obj.hide(axis="index").to_html()}</div>', unsafe_allow_html=True)
 
-# FINANCIAL BUCKETING
 def bucket_income(val):
     v = str(val).lower()
     if any(x in v for x in ['250', '500']): return "High ($250k+)"
@@ -73,7 +72,7 @@ def bucket_credit(val):
     if v in ['F', 'G']: return "Low (F, G)"
     return "Unknown"
 
-# ================ 2. AWS MULTI-FILE LOADING =================
+# ================ 2. AWS LOADER (SPECIFIC COLUMNS) =================
 @st.cache_data(ttl=3600) 
 def load_master_graph():
     aws_keys = {"key": st.secrets["aws"]["access_key"], "secret": st.secrets["aws"]["secret_key"], "client_kwargs": {"region_name": "us-east-2"}}
@@ -83,23 +82,23 @@ def load_master_graph():
     try:
         for f in files:
             path = f"s3://leadnav-demo-data/{f}"
-            # Latin1 handles messy encoding, on_bad_lines avoids crashes
+            # Loading both files with Latin1 to prevent encoding crashes
             temp_df = pd.read_csv(path, storage_options=aws_keys, low_memory=False, encoding='latin1', on_bad_lines='skip')
             temp_df.columns = [c.upper().strip() for c in temp_df.columns]
             
-            # Find the best email column for THIS specific file
-            email_opts = ['PERSONAL_EMAILS', 'EMAIL', 'EMAIL_ADDRESS']
-            found_email = next((c for c in temp_df.columns if c in email_opts), None)
-            if not found_email:
-                found_email = next((c for c in temp_df.columns if 'EMAIL' in c and 'SHA' not in c), temp_df.columns[0])
+            # Use PERSONAL_EMAILS specifically as the merge key
+            if 'PERSONAL_EMAILS' in temp_df.columns:
+                temp_df = temp_df.rename(columns={'PERSONAL_EMAILS': 'email_match'})
+            else:
+                # Fallback only if the specific key is missing from a file
+                email_fallback = next((c for c in temp_df.columns if 'EMAIL' in c and 'SHA' not in c), temp_df.columns[0])
+                temp_df = temp_df.rename(columns={email_fallback: 'email_match'})
             
-            temp_df = temp_df.rename(columns={found_email: 'email_match'})
             dataframes.append(temp_df)
             
-        # Combine the stacks
         df = pd.concat(dataframes, axis=0, ignore_index=True).reset_index(drop=True)
         
-        # Apply Mapper
+        # Mapping to clean names
         df = df.rename(columns=AWS_COLUMN_MAPPER)
         df.columns = [c.lower() for c in df.columns]
         
@@ -115,7 +114,7 @@ def load_master_graph():
         if 'marital_status' in df.columns:
             df['marital_status'] = df['marital_status'].map({'Y': 'Married', 'N': 'Single'}).fillna('Unknown')
         
-        # email explosion
+        # Handle multiple emails per row
         df['email_match'] = df['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.split(',')
         df = df.explode('email_match').reset_index(drop=True)
         df['email_match'] = df['email_match'].str.strip()
@@ -124,21 +123,23 @@ def load_master_graph():
     except Exception as e:
         st.error(f"🚨 AWS Matcher Error: {e}"); st.stop()
 
-# ================ 3. ONBOARDING =================
+# ================ 3. ONBOARDING (HARDCODED KEYS) =================
 if st.session_state.app_state == "onboarding":
     st.markdown(f"<h1 style='text-align: center; font-size: 3.5rem;'>{PITCH_COMPANY_NAME}</h1>", unsafe_allow_html=True)
     uploaded_file = st.file_uploader("Upload Customer CSV", type=["csv"])
     if uploaded_file:
         df_orders = pd.read_csv(uploaded_file, encoding='latin1', on_bad_lines='skip')
-        # Standardize order email column
-        email_col = next((c for c in df_orders.columns if 'email' in c.lower()), df_orders.columns[0])
-        df_orders = df_orders.rename(columns={email_col: 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
         
-        with st.spinner("Resolving Identity Graph Matches..."):
+        # Hardcoding the Shopify/Standard Order headers
+        df_orders = df_orders.rename(columns={'Email': 'email_match', 'Name': 'Order ID', 'Total': 'revenue_raw'})
+        
+        with st.spinner("Executing LeadNavigator Identity Resolution..."):
             df_master = load_master_graph()
+            
+            # Clean emails exactly as they are in the master list
             df_orders['email_match'] = df_orders['email_match'].astype(str).str.lower().str.replace(r'[^a-z0-9@._-]', '', regex=True).str.strip()
             
-            # The Merge
+            # Match directly on the email key
             df_joined = pd.merge(df_orders, df_master, on='email_match', how='inner').reset_index(drop=True)
             
             if not df_joined.empty:
@@ -146,31 +147,37 @@ if st.session_state.app_state == "onboarding":
                 st.session_state.app_state = "dashboard"
                 st.rerun()
             else:
-                st.error("⚠️ Zero matches found. Please check your CSV email column.")
+                st.error("⚠️ Zero matches found between your file and the Identity Graph.")
 
-# ================ 4. DASHBOARD =================
+# ================ 4. DASHBOARD (7 HARDCODED CHARTS) =================
 elif st.session_state.app_state == "dashboard":
     st.markdown(f"## 🧬 Identity Match Result")
     if st.button("← New Analysis", type="secondary"): st.session_state.app_state = "onboarding"; st.rerun()
     
     df = st.session_state.df_icp
-    # Clean Revenue
+    # Format the revenue column immediately
     df['revenue_raw'] = pd.to_numeric(df['revenue_raw'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
 
-    # TOP KPI: This now represents EVERY match found
+    # Top level metrics
     m1, m2 = st.columns(2)
     m1.metric("Resolved Profiles", f"{df['Order ID'].nunique():,.0f}")
     with m2: st.metric("Attributed Sales", f"${df['revenue_raw'].sum():,.2f}")
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # All 7 charts rendered independently
     configs = [
-        ("Gender", "gender"), ("Marital Status", "marital_status"), ("Credit Rating", "credit_rating"), 
-        ("Household Income", "income"), ("Net Worth", "net_worth"), ("Geographic Region", "region"), ("Age Range", "age")
+        ("Gender", "gender"), 
+        ("Marital Status", "marital_status"), 
+        ("Credit Rating", "credit_rating"), 
+        ("Household Income", "income"), 
+        ("Net Worth", "net_worth"), 
+        ("Geographic Region", "region"), 
+        ("Age Range", "age")
     ]
 
     for label, col in configs:
         if col in df.columns:
-            # Chart-specific copy so we don't drop rows from other charts
+            # Create a copy so one missing variable doesn't affect other charts
             chart_data = df.copy()
             chart_data = chart_data[~chart_data[col].astype(str).str.lower().isin(['u', 'nan', 'none', '', 'unknown', 'other'])]
             
@@ -185,13 +192,18 @@ elif st.session_state.app_state == "dashboard":
                         st.write("**South:** AL, AR, DC, DE, FL, GA, KY, LA, MD, MS, NC, OK, SC, TN, TX, VA, WV")
                         st.write("**West:** AK, AZ, CA, CO, HI, ID, MT, NM, NV, OR, UT, WA, WY")
 
+                # Visual Donut Chart
                 chart = alt.Chart(grp).mark_arc(innerRadius=85, stroke="#fff").encode(
-                    theta="Revenue:Q", color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
+                    theta="Revenue:Q", 
+                    color=alt.Color(f"{col}:N", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=label, orient="right", labelFontSize=14)),
                     tooltip=[alt.Tooltip(f'{col}:N', title=label), alt.Tooltip('Revenue:Q', format='$,.0f')]
                 ).properties(width=700, height=450)
+                
                 st.altair_chart(chart, use_container_width=False)
-
+                
+                # Table breakdown with green ranking
                 grp['% Share'] = (grp['Revenue'] / grp['Revenue'].sum()) * 100
                 grp['AOV'] = grp['Revenue'] / grp['Buyers']
                 grp = grp.sort_values('Revenue', ascending=False).rename(columns={col: label})
+                
                 render_premium_table(grp.style.format({'Buyers': '{:,.0f}', 'Revenue': '${:,.2f}', '% Share': '{:.1f}%', 'AOV': '${:,.2f}'}).background_gradient(subset=['% Share'], cmap=custom_light_green))
