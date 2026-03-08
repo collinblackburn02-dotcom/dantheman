@@ -13,12 +13,21 @@ AWS_COLUMN_MAPPER = {
     "GENDER": "gender",
     "AGE_RANGE": "age",
     "INCOME_RANGE": "income",
-    "PERSONAL_STATE": "region",
+    "PERSONAL_STATE": "state_raw", # Mapped to raw first for region processing
     "NET_WORTH": "net_worth",
     "CHILDREN": "children",
     "MARRIED": "marital_status",
     "HOMEOWNER": "homeowner",
     "SKIPTRACE_CREDIT_RATING": "credit_rating"
+}
+
+# 🗺️ REGIONAL GROUPING LOGIC
+STATE_TO_REGION = {
+    'ME': 'Northeast', 'NH': 'Northeast', 'VT': 'Northeast', 'MA': 'Northeast', 'RI': 'Northeast', 'CT': 'Northeast', 'NY': 'Northeast', 'PA': 'Northeast', 'NJ': 'Northeast',
+    'WI': 'Midwest', 'MI': 'Midwest', 'IL': 'Midwest', 'IN': 'Midwest', 'OH': 'Midwest', 'ND': 'Midwest', 'SD': 'Midwest', 'NE': 'Midwest', 'KS': 'Midwest', 'MN': 'Midwest', 'IA': 'Midwest', 'MO': 'Midwest',
+    'DE': 'South', 'MD': 'South', 'DC': 'South', 'VA': 'South', 'WV': 'South', 'NC': 'South', 'SC': 'South', 'GA': 'South', 'FL': 'South', 'KY': 'South', 'TN': 'South', 'MS': 'South', 'AL': 'South', 'OK': 'South', 'TX': 'South', 'AR': 'South', 'LA': 'South',
+    'ID': 'West', 'MT': 'West', 'WY': 'West', 'NV': 'West', 'UT': 'West', 'CO': 'West', 'AZ': 'West', 'NM': 'West', 'AK': 'West', 'WA': 'West', 'OR': 'West', 'CA': 'West', 'HI': 'West',
+    'PR': 'Territories', 'VI': 'Territories', 'GU': 'Territories', 'AS': 'Territories', 'MP': 'Territories'
 }
 # =========================================================
 
@@ -58,7 +67,7 @@ configs = [
     ("Gender Distribution", "gender"), 
     ("Age Range", "age"), 
     ("Household Income", "income"), 
-    ("Regional Breakdown", "region"), 
+    ("Geographic Region", "region"), 
     ("Estimated Net Worth", "net_worth"), 
     ("Presence of Children", "children"), 
     ("Marital Status", "marital_status"), 
@@ -88,17 +97,17 @@ def load_master_graph():
             if map_key in current_cols_lower:
                 df_master = df_master.rename(columns={current_cols_lower[map_key]: map_val})
         
+        # 🗺️ APPLY REGION MAPPING
+        if 'state_raw' in df_master.columns:
+            df_master['region'] = df_master['state_raw'].str.strip().str.upper().map(STATE_TO_REGION).fillna('Other')
+
         # Multi-email resolution
         email_cols = [col for col in df_master.columns if 'email' in col.lower()]
         if email_cols:
             df_master = df_master.rename(columns={email_cols[0]: 'Email'})
             df_master['Email'] = df_master['Email'].astype(str).str.lower().str.split(',')
-            
-            # --- FIX: EXPLODE AND STRIP TARGETED COLUMN ---
             df_master = df_master.explode('Email')
             df_master['Email'] = df_master['Email'].str.strip()
-            
-            # Final deduplication and index cleaning
             df_master = df_master.drop_duplicates(subset=['Email'], keep='first').reset_index(drop=True)
             
         return df_master
@@ -160,15 +169,19 @@ elif st.session_state.app_state == "dashboard":
     # Visual Reporting Loop
     for label, col_name in configs:
         if col_name in df_joined.columns:
-            # CLEANING: Filter out U, Unknown, etc.
-            df_filtered = df_joined[~df_joined[col_name].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', 'null', ''])]
+            # CLEANING: Filter out U, Unknown, nan, etc.
+            df_filtered = df_joined[~df_joined[col_name].astype(str).str.lower().isin(['u', 'unknown', 'nan', 'none', 'null', '', 'other'])]
             
             grp = df_filtered.groupby(col_name).agg(Buyers=('Order ID', 'nunique'), Revenue=('Total', 'sum')).reset_index()
             
             if not grp.empty:
                 st.markdown(f"## {label}")
                 
-                # --- PIE/DONUT CHART ---
+                # 🏷️ SPECIAL TAG FOR REGIONS
+                if col_name == "region":
+                    st.info("📍 **Region Mapping:** NE (New England/NY/PA/NJ), MW (Midwest), S (South), W (West/Pacific).")
+
+                # --- PREMIUM DONUT CHART ---
                 pie_chart = alt.Chart(grp).mark_arc(innerRadius=75, stroke="#fff").encode(
                     theta=alt.Theta(field="Revenue", type="quantitative"),
                     color=alt.Color(field=col_name, type="nominal", scale=alt.Scale(scheme='tableau20'), legend=alt.Legend(title=None, orient="bottom", columns=3)),
